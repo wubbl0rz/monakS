@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test</title>
+  <style>
+    video {
+      height: 100vh;
+      width: 100vw;
+    }
+  </style>
+</head>
+
+<body>
+  <video autoplay controls muted id="player"></video>
+  <script>
+    (async () => {
+      let pc = new RTCPeerConnection();
+
+      pc.ontrack = t => {
+        console.log(t);
+        let player = document.getElementById("player");
+        player.srcObject = t.streams[0];
+      }
+
+      let result = await fetch("/signal");
+      let json = await result.json();
+
+      let offer = json.offer;
+      let id = json.id;
+
+      pc.setRemoteDescription(offer);
+
+      let answer = await pc.createAnswer();
+      pc.setLocalDescription(answer);
+
+      console.log(answer);
+
+      await fetch("/signal",
+        {
+          method: "POST",
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(
+            {
+              id: id,
+              answer: answer
+            }
+          )
+        }
+      )
+    })();
+  </script>
+</body>
+
+</html>
