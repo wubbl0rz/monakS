@@ -4,55 +4,77 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Test</title>
+  <title>monakS</title>
+  <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@3.1.9/dist/browser/signalr.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vue@2.6.12/dist/vue.js"></script>
   <style>
     video {
-      height: 100vh;
-      width: 100vw;
+      width: 200px;
+      height: 200px;
     }
   </style>
 </head>
 
 <body>
-  <video autoplay controls muted id="player"></video>
+  <div id="app">
+    <video v-for="index in 10" poster="" autoplay controls muted :id="'player'+index"></video>
+  </div>
   <script>
-    (async () => {
-      let pc = new RTCPeerConnection();
+    new Vue({
+      el: "#app",
+      data: {
+        signalr: null,
+      },
+      methods: {
+        async connect(i) {
+          let pc = new RTCPeerConnection();
 
-      pc.ontrack = t => {
-        console.log(t);
-        let player = document.getElementById("player");
-        player.srcObject = t.streams[0];
-      }
-
-      let result = await fetch("/signal");
-      let json = await result.json();
-
-      let offer = json.offer;
-      let id = json.id;
-
-      pc.setRemoteDescription(offer);
-
-      let answer = await pc.createAnswer();
-      pc.setLocalDescription(answer);
-
-      console.log(answer);
-
-      await fetch("/signal",
-        {
-          method: "POST",
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(
-            {
-              id: id,
-              answer: answer
+          pc.ontrack = t => {
+            console.log(t);
+            let player = document.getElementById("player" + i);
+            player.onplaying = p => {
+              console.log("======================");
+              console.log(new Date().toISOString());
             }
-          )
+
+            player.srcObject = t.streams[0];
+          };
+
+          pc.onicecandidate = e => {
+            console.log("CANDIDATE");
+            console.log(e);
+            if (e.candidate) {
+              this.signalr.invoke("setCandidate", session_id, e.candidate);
+            }
+          };
+
+          let session_id = await this.signalr.invoke("getSessionId");
+
+          let offer_sdp = await this.signalr.invoke("getOffer", session_id);
+
+          await pc.setRemoteDescription({
+            type: "offer",
+            sdp: offer_sdp
+          });
+
+          let answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          let answer_sdp = pc.localDescription.sdp;
+          answer_sdp = answer_sdp.replace("a=fmtp:102 profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1\r\n", "");
+          console.log(answer_sdp);
+          this.signalr.invoke("setAnswer", session_id, answer_sdp);
         }
-      )
-    })();
+      },
+      async mounted() {
+        this.signalr = new signalR.HubConnectionBuilder().withUrl("/msg").build();
+        await this.signalr.start();
+        console.log(new Date().toISOString());
+        for (let i = 1; i < 11; i++) {
+          await this.connect(i);
+        }
+      }
+    });
   </script>
 </body>
 
