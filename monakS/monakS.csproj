@@ -13,14 +13,14 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <Folder Include="Controllers" />
       <Folder Include="wwwroot" />
     </ItemGroup>
 
     <ItemGroup>
       <PackageReference Include="FFmpeg.AutoGen" Version="4.3.1" />
       <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="3.1.9" />
-      <PackageReference Include="SIPSorcery" Version="4.0.85-pre" />
+      <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.NewtonsoftJson" Version="3.1.9" />
+      <PackageReference Include="SIPSorcery" Version="4.0.88-pre" />
     </ItemGroup>
 
 

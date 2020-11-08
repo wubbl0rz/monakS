@@ -5,50 +5,70 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>monakS</title>
-  <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@3.1.9/dist/browser/signalr.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/vue@2.6.12/dist/vue.js"></script>
+  <script src="/signalr.min.js"></script>
+  <script src="/adapter.js"></script>
+  <script src="/vue.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/eruda"></script>
+  <script>eruda.init();</script>
   <style>
+    * {
+      margin: 0;
+      padding: 0;
+    }
+
+    [v-cloak] {
+      display: none
+    }
+
     video {
-      width: 200px;
-      height: 200px;
+      width: 100%;
     }
   </style>
 </head>
 
 <body>
-  <div id="app">
-    <video v-for="index in 10" poster="" autoplay controls muted :id="'player'+index"></video>
+  <div id="app" v-cloak>
+    <div v-for="(cam, i) in cameras" :key="i">
+      <video :id="`player_${cam.id}`" playsinline autoplay muted></video>
+    </div>
   </div>
   <script>
+    console.log(`main: ${new Date().toISOString()}`);
     new Vue({
       el: "#app",
       data: {
         signalr: null,
+        cameras: [],
       },
+
       methods: {
-        async connect(i) {
+        async sleep(milliseconds) {
+          return new Promise(resolve => setTimeout(resolve, milliseconds));
+        },
+        async setStream(stream, i) {
+          return new Promise(resolve => setTimeout(() => {
+            let player = document.getElementById(`player_${i}`);
+            player.srcObject = stream;
+            resolve();
+          }, 100));
+        },
+        async connect(cam, i) {
           let pc = new RTCPeerConnection();
 
-          pc.ontrack = t => {
-            console.log(t);
-            let player = document.getElementById("player" + i);
-            player.onplaying = p => {
-              console.log("======================");
-              console.log(new Date().toISOString());
-            }
-
-            player.srcObject = t.streams[0];
+          pc.ontrack = async t => {
+            let stream = t.streams[0];
+            await this.setStream(stream, i);
+            //this.streams.push(stream);
+            //document.createElement("video")
           };
 
-          pc.onicecandidate = e => {
-            console.log("CANDIDATE");
-            console.log(e);
+          pc.onicecandidate = async e => {
             if (e.candidate) {
-              this.signalr.invoke("setCandidate", session_id, e.candidate);
+              await this.signalr.invoke("setCandidate", session_id, e.candidate);
             }
           };
 
-          let session_id = await this.signalr.invoke("getSessionId");
+          let session_id = await this.signalr.invoke("getSessionId", cam);
 
           let offer_sdp = await this.signalr.invoke("getOffer", session_id);
 
@@ -62,16 +82,27 @@
 
           let answer_sdp = pc.localDescription.sdp;
           answer_sdp = answer_sdp.replace("a=fmtp:102 profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1\r\n", "");
-          console.log(answer_sdp);
-          this.signalr.invoke("setAnswer", session_id, answer_sdp);
+          await this.signalr.invoke("setAnswer", session_id, answer_sdp);
         }
       },
       async mounted() {
         this.signalr = new signalR.HubConnectionBuilder().withUrl("/msg").build();
         await this.signalr.start();
-        console.log(new Date().toISOString());
-        for (let i = 1; i < 11; i++) {
-          await this.connect(i);
+        this.cameras = await (await fetch("/camera")).json();
+
+        for (const cam of this.cameras) {
+          console.log(cam);
+          await this.connect(cam, cam.id);
+          setTimeout(async () => {
+            let player = document.getElementById(`player_${cam.id}`);
+            for (let z = 0; z < 3; z++) {
+              if (player.readyState == 0) {
+                console.log("RECONNECT");
+                await this.connect(cam, cam.id);
+                await this.sleep(5000);
+              }
+            }
+          }, 10000);
         }
       }
     });
