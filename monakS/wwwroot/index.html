@@ -23,13 +23,29 @@
     video {
       width: 100%;
     }
+
+    .overlay {
+      position: absolute;
+      border-style: solid;
+      border-color: red;
+      border-radius: 2px;
+      color: white;
+      font-size: 20px;
+      font-weight: bold;
+      font-family: monospace;
+      display: none;
+    }
   </style>
 </head>
 
 <body>
   <div id="app" v-cloak>
     <div v-for="(cam, i) in cameras" :key="i">
-      <video :id="`player_${cam.id}`" playsinline autoplay muted></video>
+      <div style="max-width: 100%; position: relative;">
+        <div :id="`overlay_${cam.id}`" class="overlay">
+        </div>
+        <video :id="`player_${cam.id}`" playsinline autoplay muted></video>
+      </div>
     </div>
   </div>
   <script>
@@ -89,6 +105,40 @@
         this.signalr = new signalR.HubConnectionBuilder().withUrl("/msg").build();
         await this.signalr.start();
         this.cameras = await (await fetch("/camera")).json();
+
+        this.signalr.on("detected", (cam, summary) => {
+
+          let el = document.getElementById(`overlay_${cam.id}`);
+
+          console.log(summary);
+
+          let reset = Date.now();
+
+          let pos = summary.detections[0];
+
+          var left = pos.left * 100;
+          var right = pos.right * 100;
+          var top = pos.top * 100;
+          var bottom = pos.bottom * 100;
+
+          el.style.left = `${left}%`;
+          el.style.top = `${top}%`;
+          el.style.width = `${right - left}%`;
+          el.style.height = `${bottom - top}%`;
+
+          el.style.display = "block";
+
+          el.innerHTML = "<p style='transform: translate(0, -100%); " +
+            "-webkit-text-fill-color: white; -webkit-text-stroke-color: red; " +
+            "-webkit-text-stroke-width: 1px;'> " + pos.label + "</p>";
+
+          // setTimeout(() => {
+          //   if (Date.now() - reset >= 3) {
+          //     el.style.display = "none";
+          //   }
+          // }, 3000);
+
+        });
 
         for (const cam of this.cameras) {
           console.log(cam);

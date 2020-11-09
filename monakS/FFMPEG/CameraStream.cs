@@ -62,6 +62,14 @@ namespace monakS.FFMPEG
         {
           try
           {
+            using var objectDetector = new ObjectDetector();
+            objectDetector.Detected += summary =>
+            {
+              _hubContext.Clients.All.SendAsync("detected", cam, summary);
+            };
+
+            cameraStream.OnKeyFrame += objectDetector.Detect;
+            
             await Task.Run(cameraStream.Loop);
             break;
           }
@@ -206,7 +214,7 @@ namespace monakS.FFMPEG
 
         if (pkt->pts <= lastTimestamp)
         {
-          Console.WriteLine("WRONG TS ... " + _cam.Id);
+          //Console.WriteLine("WRONG TS ... " + _cam.Id);
           continue;
         }
         

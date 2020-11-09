@@ -42,26 +42,32 @@ namespace monakS
       {
         Id = 0,
         Name = "Wohnzimmer",
-        StreamUrl = @"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
+        StreamUrl = @"rtsp://localhost:8554/mystream"
       },
       new Camera()
       {
         Id = 1,
-        Name = "Flur",
-        StreamUrl = @"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
+        Name = "Iphone",
+        StreamUrl = @"rtsp://192.168.1.146"
       },
-      new Camera()
-      {
-        Id = 2,
-        Name = "Hof",
-        StreamUrl = @"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
-      },
-      new Camera()
-      {
-        Id = 3,
-        Name = "Keller",
-        StreamUrl = @"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
-      },
+      // new Camera()
+      // {
+      //   Id = 1,
+      //   Name = "Flur",
+      //   StreamUrl = @"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
+      // },
+      // new Camera()
+      // {
+      //   Id = 2,
+      //   Name = "Hof",
+      //   StreamUrl = @"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
+      // },
+      // new Camera()
+      // {
+      //   Id = 3,
+      //   Name = "Keller",
+      //   StreamUrl = @"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
+      // },
     };
 
     // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
