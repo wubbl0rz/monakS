@@ -4,11 +4,14 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using FFmpeg.AutoGen;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using monakS.BackgroundServices;
 using monakS.FFMPEG;
 using Newtonsoft.Json.Converters;
 using SIPSorcery.Net;
@@ -32,10 +35,21 @@ namespace monakS
       services.AddControllers().AddNewtonsoftJson(options =>
         options.SerializerSettings.Converters.Add(new StringEnumConverter()));
       services.AddSingleton<CameraStreamPool>();
+      services.AddHostedService<ObjectDetectionService>();
       services.AddControllers();
+      services.AddCors(options =>
+      {
+        options.AddPolicy("allow_all",
+          builder =>
+          {
+            builder.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+          });
+      });
       services.AddSignalR().AddNewtonsoftJsonProtocol();
     }
-    
+
     public static List<Camera> CAMERAS = new List<Camera>()
     {
       new Camera()
@@ -47,9 +61,39 @@ namespace monakS
       new Camera()
       {
         Id = 1,
-        Name = "Iphone",
-        StreamUrl = @"rtsp://192.168.1.146"
+        Name = "Flur",
+        StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
       },
+      // new Camera()
+      // {
+      //   Id = 2,
+      //   Name = "Wohnzimmer",
+      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
+      // },
+      // new Camera()
+      // {
+      //   Id = 3,
+      //   Name = "Wohnzimmer",
+      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
+      // },
+      // new Camera()
+      // {
+      //   Id = 4,
+      //   Name = "Wohnzimmer",
+      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
+      // },
+      // new Camera()
+      // {
+      //   Id = 5,
+      //   Name = "Wohnzimmer",
+      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
+      // },
+      // new Camera()
+      // {
+      //   Id = 6,
+      //   Name = "Wohnzimmer",
+      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
+      // },
       // new Camera()
       // {
       //   Id = 1,
@@ -72,48 +116,50 @@ namespace monakS
 
     // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
     public void Configure(IApplicationBuilder app,
-      IWebHostEnvironment env, CameraStreamPool cameraStreamPool)
+      IWebHostEnvironment env, CameraStreamPool 
+        cameraStreamPool, IHubContext<SignalHub> hub)
     {
       // var pc = new RTCPeerConnection(null);
       // var r = new WeakReference(pc);
       // WebRtcSignalHub.POOL.Enqueue(pc);
       // pc = null;
 
+      //ffmpeg.av_log_set_level(ffmpeg.AV_LOG_QUIET);
+
       Parallel.For(0, 10, i =>
       {
-        WebRtcSignalHub.POOL.Enqueue(new RTCPeerConnection(null));
+        SignalHub.POOL.Enqueue(new RTCPeerConnection(null));
       });
-      
+
       foreach (var camera in CAMERAS)
       {
         cameraStreamPool.Start(camera);
-        Console.WriteLine("STARTED");
       }
 
-      Task.Run(() =>
+      var timer = new System.Timers.Timer {AutoReset = false, Interval = 1000};
+      timer.Elapsed += (sender, args) =>
       {
-        while (true)
-        {
-          //GC.Collect();
-          var proc = Process.GetCurrentProcess();
-          Console.WriteLine("Working set {0} KB", proc.WorkingSet64 / 1024);
-          // Console.WriteLine("Active WEBRTC peers: {0}", WebRtcSignalHub.ACTIVE_CONNECTIONS);
-          Console.WriteLine($"WebRtc pool count: {WebRtcSignalHub.POOL.Count}");
-          //Console.WriteLine($"REF: {r.IsAlive}");
+        //GC.Collect();
+        var proc = Process.GetCurrentProcess();
+        Console.WriteLine("Working set {0} KB", proc.WorkingSet64 / 1024);
+        // Console.WriteLine("Active WEBRTC peers: {0}", WebRtcSignalHub.ACTIVE_CONNECTIONS);
+        Console.WriteLine($"WebRtc pool count: {SignalHub.POOL.Count}");
+        //Console.WriteLine($"REF: {r.IsAlive}");
 
-          if (WebRtcSignalHub.POOL.Count < 500)
-          {
-            WebRtcSignalHub.POOL.Enqueue(new RTCPeerConnection(null));
-          }
-
-          Thread.Sleep(2500);
-        }
-      });
+        // if (SignalHub.POOL.Count < 500)
+        // {
+        //   SignalHub.POOL.Enqueue(new RTCPeerConnection(null));
+        // }
+        timer.Start();
+      };
+      timer.Start();
 
       if (env.IsDevelopment())
       {
         app.UseDeveloperExceptionPage();
       }
+      
+      app.UseCors("allow_all");
 
       app.UseFileServer();
 
@@ -122,7 +168,7 @@ namespace monakS
       app.UseEndpoints(endpoints =>
       {
         endpoints.MapControllers();
-        endpoints.MapHub<WebRtcSignalHub>("/msg");
+        endpoints.MapHub<SignalHub>("/msg");
       });
     }
   }

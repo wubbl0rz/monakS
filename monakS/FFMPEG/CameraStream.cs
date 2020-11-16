@@ -7,8 +7,10 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.NetworkInformation;
+using System.Reactive.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using FFmpeg.AutoGen;
 using Microsoft.AspNetCore.SignalR;
@@ -23,26 +25,44 @@ namespace monakS.FFMPEG
   public class CameraStreamPool
   {
     private readonly ILogger<CameraStreamPool> _log;
-    private readonly IHubContext<WebRtcSignalHub> _hubContext;
+    private readonly IHubContext<SignalHub> _hubContext;
 
     private readonly ConcurrentDictionary<int, CameraStream> _streams =
       new ConcurrentDictionary<int, CameraStream>();
 
-    public void GetOutput(Camera cam, Action<AVPacketHandle> callback)
+    public event Action<Camera> Started;
+    public event Action<Camera> Stopped;
+
+    public CameraStreamInfo GetOutputInfo(Camera cam)
+    {
+      var info = new CameraStreamInfo();
+
+      if (_streams.TryGetValue(cam.Id, out var cameraStream))
+      {
+        info.CodecParameters = cameraStream.CodecParameters;
+        info.TimeBase = cameraStream.TimeBase;
+      }
+
+      return info;
+    }
+
+    public CameraOutput GetOutput(Camera cam)
     {
       if (_streams.TryGetValue(cam.Id, out var cameraStream))
       {
-        cameraStream.OnNextFrame += callback;
+        return new CameraOutput(cameraStream);
       }
+      
+      throw new IOException("Camera not found");
     }
 
-    public CameraStreamPool(ILogger<CameraStreamPool> log, IHubContext<WebRtcSignalHub> hubContext)
+    public CameraStreamPool(ILogger<CameraStreamPool> log, IHubContext<SignalHub> hubContext)
     {
       _log = log;
       _hubContext = hubContext;
     }
 
-    public void Stop(Camera cam)
+    public async Task Stop(Camera cam)
     {
       if (_streams.TryRemove(cam.Id, out var cameraStream))
       {
@@ -53,54 +73,115 @@ namespace monakS.FFMPEG
     public bool Start(Camera cam)
     {
       var cameraStream = new CameraStream(cam);
-
       var created = _streams.TryAdd(cam.Id, cameraStream);
+
+      if (!created)
+        return false;
+
+      var connected = false;
+
+      cameraStream.OnConnected += () =>
+      {
+        _log.LogInformation($"Connected: {cam.StreamUrl} ({cam.Name})");
+        if (!connected)
+        {
+          connected = true;
+          this.Started?.Invoke(cam);
+        }
+      };
 
       Task.Run(async () =>
       {
-        while (created)
+        while (true)
         {
+          _log.LogInformation($"Connecting: {cam.StreamUrl} ({cam.Name})");
+
           try
           {
-            using var objectDetector = new ObjectDetector();
-            objectDetector.Detected += summary =>
-            {
-              _hubContext.Clients.All.SendAsync("detected", cam, summary);
-            };
-
-            cameraStream.OnKeyFrame += objectDetector.Detect;
-            
             await Task.Run(cameraStream.Loop);
             break;
           }
           catch (Exception ex)
           {
             _log.LogWarning(ex.Message);
-          }
-          finally
-          {
             cameraStream.Reset();
           }
 
           await Task.Delay(5000);
         }
 
-        if (created)
-        {
-          _streams.TryRemove(cam.Id, out _);
-        }
+        _streams.TryRemove(cam.Id, out _);
+        this.Stopped?.Invoke(cam);
+        cameraStream.Dispose();
+
       });
 
-      return created;
+      return true;
     }
   }
 
-  public class CameraStream
+  public class CameraOutput
+  {
+    private readonly CameraStream _cameraStream;
+    private readonly Action _onClose;
+    private readonly Channel<AVPacketHandle> _channel;
+    public bool IsActive { get; set; } = true;
+
+    public CameraOutput(CameraStream cameraStream, Action onClose = null)
+    {
+      _cameraStream = cameraStream;
+      _onClose = onClose;
+
+      _channel = Channel.CreateBounded<AVPacketHandle>(new BoundedChannelOptions(1)
+      {
+        SingleReader = true, 
+        SingleWriter = true,
+        //FullMode = BoundedChannelFullMode.DropOldest
+      });
+
+      cameraStream.OnNextFrame += WritePacket;
+      cameraStream.OnDispose += this.Close;
+    }
+
+    public IAsyncEnumerable<AVPacketHandle> ReadAllAsync(CancellationToken token = default)
+    {
+      return _channel.Reader.ReadAllAsync(token);
+    }
+
+    private void WritePacket(AVPacketHandle pkt)
+    {
+      _channel.Writer.TryWrite(pkt);
+    }
+
+    public void Close()
+    {
+      if (!this.IsActive)
+        return;
+      this.IsActive = false;
+      _channel.Writer.TryComplete();
+      _cameraStream.OnNextFrame -= WritePacket;
+      this._onClose?.Invoke();
+      Console.WriteLine("CLOSE");
+    }
+  }
+
+  public class CameraStreamInfo
+  {
+    public AVCodecParametersHandle CodecParameters { get; set; }
+    public AVRational TimeBase { get; set; }
+    public AVPixelFormat Format { get; set; }
+  }
+
+  public class CameraStream : IDisposable
   {
     private readonly Camera _cam;
 
     public event Action<AVPacketHandle> OnNextFrame;
-    public event Action<AVPacketHandle> OnKeyFrame;
+    public event Action OnConnected;
+    public event Action OnDispose;
+
+    public AVCodecParametersHandle CodecParameters { get; private set; }
+    public AVRational TimeBase { get; private set; }
 
     private unsafe AVPacket* _pkt;
     private unsafe AVFormatContext* _inputCtx;
@@ -113,7 +194,7 @@ namespace monakS.FFMPEG
 
     private unsafe int CheckTimeout(void* p)
     {
-      return _timeoutCounter.Elapsed.Seconds > 5 ? 1 : 0;
+      return _timeoutCounter.Elapsed.Seconds > 15 ? 1 : 0;
     }
 
     public unsafe CameraStream(Camera cam)
@@ -144,16 +225,15 @@ namespace monakS.FFMPEG
 
     public void Break()
     {
-      var taskCompletionSource = new TaskCompletionSource<bool>();
       _cancel = true;
     }
 
     public unsafe void Loop()
     {
-      ffmpeg.av_log_set_level(ffmpeg.AV_LOG_QUIET);
+      Console.WriteLine("Start connect: " + _cam.StreamUrl);
       AVDictionary* dict = null;
       ffmpeg.av_dict_set(&dict, "rtsp_transport", "tcp", 0);
-      ffmpeg.av_dict_set(&dict, "stimeout", $"{TimeSpan.FromSeconds(5).TotalMilliseconds * 1000}", 0);
+      ffmpeg.av_dict_set(&dict, "stimeout", $"{TimeSpan.FromSeconds(15).TotalMilliseconds * 1000}", 0);
 
       var inputCtx = ffmpeg.avformat_alloc_context();
 
@@ -163,80 +243,96 @@ namespace monakS.FFMPEG
       // will free inputCtx on failure automatically
       if (ffmpeg.avformat_open_input(&inputCtx, _cam.StreamUrl, null, &dict) != 0)
       {
+        ffmpeg.av_dict_free(&dict);
         throw new Exception("Cannot connect to: " + _cam.StreamUrl);
       }
+
+      ffmpeg.av_dict_free(&dict);
 
       _inputCtx = inputCtx;
 
       _timeoutCounter.Restart();
 
-      ffmpeg.avformat_find_stream_info(_inputCtx, null);
+      ffmpeg.avformat_find_stream_info(inputCtx, null);
 
       _timeoutCounter.Stop();
 
-      for (var i = 0; i < _inputCtx->nb_streams; i++)
+      for (var i = 0; i < inputCtx->nb_streams; i++)
       {
-        var stream = _inputCtx->streams[i];
+        var stream = inputCtx->streams[i];
         if (stream->codecpar->codec_type == AVMediaType.AVMEDIA_TYPE_VIDEO)
         {
           _streamIndex = stream->index;
           _stream = stream;
-          _frameRate = ffmpeg.av_q2d(_stream->r_frame_rate);
+          _frameRate = ffmpeg.av_q2d(stream->r_frame_rate);
           break;
         }
       }
 
       if (_stream == null)
       {
+        ffmpeg.avformat_close_input(&inputCtx);
         throw new Exception("No VIDEO STREAM found");
       }
 
-      var pkt = ffmpeg.av_packet_alloc();
+      _pkt = ffmpeg.av_packet_alloc();
       var lastTimestamp = 0L;
 
-      Console.WriteLine($"Connected: {_cam.StreamUrl} ({_cam.Name})");
+      this.CodecParameters = new AVCodecParametersHandle(_stream->codecpar);
+      this.TimeBase = _stream->time_base;
+
+      this.OnConnected?.Invoke();
 
       while (!_cancel)
       {
-        ffmpeg.av_init_packet(pkt);
+        ffmpeg.av_packet_unref(_pkt);
+        //ffmpeg.av_init_packet(pkt);
 
-        if (ffmpeg.av_read_frame(_inputCtx, pkt) != 0)
+        _timeoutCounter.Restart();
+
+        if (ffmpeg.av_read_frame(inputCtx, _pkt) != 0)
         {
-          ffmpeg.av_packet_unref(pkt);
+          // ffmpeg.av_packet_free(&pkt);
+          // ffmpeg.avformat_close_input(&inputCtx);
           throw new Exception("Error reading STREAM: " + _cam.StreamUrl);
         }
 
-        if (pkt->stream_index != _streamIndex || pkt->pts < 0)
+        _timeoutCounter.Stop();
+
+        if (_pkt->stream_index != _streamIndex || _pkt->pts < 0)
         {
-          ffmpeg.av_packet_unref(pkt);
+          //ffmpeg.av_packet_unref(_pkt);
           continue;
         }
 
-        if (pkt->pts <= lastTimestamp)
+        if (_pkt->pts <= lastTimestamp)
         {
-          //Console.WriteLine("WRONG TS ... " + _cam.Id);
+          //ffmpeg.av_packet_unref(_pkt);
+          Console.WriteLine("WRONG TS ... " + _cam.Id);
           continue;
         }
-        
-        lastTimestamp = pkt->pts;
 
-        pkt->duration = pkt->duration == 0 ? (long) (90000 / _frameRate) : pkt->duration;
+        lastTimestamp = _pkt->pts;
 
-        var eventPkt = new AVPacketHandle(pkt,
+        _pkt->duration = _pkt->duration == 0 ? (long) (90000 / _frameRate) : _pkt->duration;
+
+        var ms = _pkt->duration *
+                 (_stream->time_base.num / (float) _stream->time_base.den);
+
+        OnNextFrame?.Invoke(new AVPacketHandle(_pkt,
           _stream->codecpar->width,
-          _stream->codecpar->height);
+          _stream->codecpar->height,
+          ms,
+          _stream->time_base));
 
-        if (pkt->flags == ffmpeg.AV_PKT_FLAG_KEY)
-        {
-          this.OnKeyFrame?.Invoke(eventPkt);
-        }
-
-        //Console.WriteLine(pkt->duration);
-
-        OnNextFrame?.Invoke(eventPkt);
-
-        ffmpeg.av_packet_unref(pkt);
+        ffmpeg.av_packet_unref(_pkt);
       }
+    }
+
+    public void Dispose()
+    {
+      this.Reset();
+      this.OnDispose?.Invoke();
     }
   }
 }

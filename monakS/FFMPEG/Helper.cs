@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using FFmpeg.AutoGen;
@@ -22,7 +24,7 @@ namespace monakS.FFMPEG
     public string Label { get; set; }
     public double Confidence { get; set; }
   }
-  
+
   public class ObjectDetectorSummary
   {
     public List<ObjectDetectorResult> Detections { get; set; } = new List<ObjectDetectorResult>();
@@ -36,13 +38,14 @@ namespace monakS.FFMPEG
     private unsafe AVCodecContext* _h264DecCtx;
     private unsafe AVCodecContext* _jpgEncCtx;
 
-    public event Action<ObjectDetectorSummary> Detected;
+    public DateTime LastMotion { get; private set; }
+    public event Action<ObjectDetectorSummary, AVPacketHandle> Detected;
 
     public ObjectDetector()
     {
       this.Loop();
     }
-  
+
     private async void Loop()
     {
       var httpClient = new HttpClient();
@@ -58,16 +61,25 @@ namespace monakS.FFMPEG
           {"detect", new JObject(new JProperty("*", 60))}
         };
 
-        var response = await httpClient.PostAsync(
-          "http://localhost:8080/detect",
-          new StringContent(json.ToString(), Encoding.UTF8, "application/json"));
-
-        var summary = JsonConvert.DeserializeObject<ObjectDetectorSummary>(
-          await response.Content.ReadAsStringAsync());
-
-        if (summary.Detections.Count > 0)
+        try
         {
-          this.Detected?.Invoke(summary);
+          var response = await httpClient.PostAsync(
+            "http://localhost:8080/detect",
+            new StringContent(json.ToString(), Encoding.UTF8, "application/json"));
+          
+          var summary = JsonConvert.DeserializeObject<ObjectDetectorSummary>(
+            await response.Content.ReadAsStringAsync());
+
+          if (summary.Detections.Count > 0)
+          {
+            //tuple.cb?.Invoke(summary, jpgImage);
+            this.LastMotion = DateTime.Now;
+            this.Detected?.Invoke(summary, jpgImage);
+          }
+        }
+        catch (Exception)
+        {
+          //TODO: logger error
         }
       }
     }
@@ -105,21 +117,21 @@ namespace monakS.FFMPEG
 
       var frameSrc = ffmpeg.av_frame_alloc();
       var outPkt = AVPacketHandle.Empty;
-
-      if (!FFMPEGHelper.TryFFMPEG(ffmpeg.avcodec_send_packet(_h264DecCtx, pkt.GetRawPacket())) ||
-          !FFMPEGHelper.TryFFMPEG(ffmpeg.avcodec_receive_frame(_h264DecCtx, frameSrc)))
+      
+      if (!FFMPEGHelper.Try(ffmpeg.avcodec_send_packet(_h264DecCtx, pkt.GetRawPacket())) ||
+          !FFMPEGHelper.Try(ffmpeg.avcodec_receive_frame(_h264DecCtx, frameSrc)))
       {
         ffmpeg.av_frame_free(&frameSrc);
         return outPkt;
       }
-
+      
       var frameResized = _resizer.Resize(frameSrc);
       var thumbPkt = ffmpeg.av_packet_alloc();
 
-      if (FFMPEGHelper.TryFFMPEG(ffmpeg.avcodec_send_frame(_jpgEncCtx, frameResized)) &&
-          FFMPEGHelper.TryFFMPEG(ffmpeg.avcodec_receive_packet(_jpgEncCtx, thumbPkt)))
+      if (FFMPEGHelper.Try(ffmpeg.avcodec_send_frame(_jpgEncCtx, frameResized)) &&
+          FFMPEGHelper.Try(ffmpeg.avcodec_receive_packet(_jpgEncCtx, thumbPkt)))
       {
-        outPkt = new AVPacketHandle(thumbPkt, _resizer.Dst.Width, _resizer.Dst.Height);
+        outPkt = new AVPacketHandle(thumbPkt, _resizer.Dst.Width, _resizer.Dst.Height, 0);
       }
 
       ffmpeg.av_packet_free(&thumbPkt);
@@ -129,7 +141,9 @@ namespace monakS.FFMPEG
       return outPkt;
     }
 
-    public void Detect(AVPacketHandle pkt)
+    // TODO await bool ?
+    public void Detect(AVPacketHandle pkt,
+      Action<ObjectDetectorSummary, AVPacketHandle> detectedCallback = null)
     {
       _images.Writer.TryWrite(pkt);
     }
@@ -137,6 +151,33 @@ namespace monakS.FFMPEG
     public void Dispose()
     {
       //cleanup
+    }
+  }
+
+  public class AVCodecParametersHandle
+  {
+    private readonly unsafe AVCodecParameters* _parameters;
+
+    public unsafe AVCodecParameters* GetRawParameters()
+    {
+      return _parameters;
+    }
+
+    public unsafe AVCodecParametersHandle(AVCodecParameters* parameters)
+    {
+      this._parameters = ffmpeg.avcodec_parameters_alloc();
+      ffmpeg.avcodec_parameters_copy(this._parameters, parameters);
+    }
+
+    ~AVCodecParametersHandle()
+    {
+      unsafe
+      {
+        fixed (AVCodecParameters** tmpRef = &this._parameters)
+        {
+          ffmpeg.avcodec_parameters_free(tmpRef);
+        }
+      }
     }
   }
 
@@ -150,9 +191,13 @@ namespace monakS.FFMPEG
     }
 
     public byte[] Data { get; } = new byte[0];
+    public double DurationSeconds { get; set; }
     public long Duration { get; } = 0;
     public int Height { get; } = 0;
     public int Width { get; } = 0;
+    public AVRational TimeBase { get; }
+    public unsafe bool IsKeyframe => _pkt->flags == ffmpeg.AV_PKT_FLAG_KEY;
+    public AVCodecParametersHandle CodecParameters { get; }
 
     public static AVPacketHandle Empty => new AVPacketHandle();
 
@@ -160,13 +205,21 @@ namespace monakS.FFMPEG
     {
     }
 
-    public unsafe AVPacketHandle(AVPacket* pkt, int width, int height)
+    public unsafe AVPacketHandle(AVPacket* pkt,
+      int width,
+      int height,
+      double seconds = 0,
+      AVRational timeBase = default,
+      AVCodecParametersHandle codecParameters = null)
     {
       Width = width;
       Height = height;
       _pkt = ffmpeg.av_packet_clone(pkt);
       this.Data = new Span<byte>(_pkt->data, _pkt->size).ToArray();
       this.Duration = pkt->duration;
+      this.DurationSeconds = seconds;
+      this.TimeBase = timeBase;
+      this.CodecParameters = codecParameters;
     }
 
     ~AVPacketHandle()
@@ -229,7 +282,7 @@ namespace monakS.FFMPEG
         dstFmt,
         dst.Width,
         dst.Height,
-        1);
+        32);
 
       _buffer = Marshal.AllocHGlobal(bufferSize);
       _dstData = new byte_ptrArray4();
@@ -242,7 +295,7 @@ namespace monakS.FFMPEG
         dstFmt,
         dst.Width,
         dst.Height,
-        1);
+        32);
     }
 
     public unsafe void Dispose()
@@ -279,7 +332,7 @@ namespace monakS.FFMPEG
 
   public static class FFMPEGHelper
   {
-    public static unsafe bool TryFFMPEG(int res)
+    public static unsafe bool Try(int res)
     {
       if (res == 0)
         return true;
@@ -287,7 +340,7 @@ namespace monakS.FFMPEG
       fixed (byte* buffer = new byte[2048])
       {
         ffmpeg.av_strerror(res, buffer, 2048);
-        var str = System.Text.ASCIIEncoding.Default.GetString(buffer, 2048);
+        var str = System.Text.Encoding.Default.GetString(buffer, 2048);
         Console.WriteLine(str);
       }
 

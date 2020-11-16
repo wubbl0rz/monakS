@@ -10,6 +10,10 @@
   <script src="/vue.js"></script>
   <script src="//cdn.jsdelivr.net/npm/eruda"></script>
   <script>eruda.init();</script>
+  <link rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/5.8.55/css/materialdesignicons.min.css"
+    integrity="sha512-x96qcyADhiw/CZY7QLOo7dB8i/REOEHZDhNfoDuJlyQ+yZzhdy91eAa4EkO7g3egt8obvLeJPoUKEKu5C5JYjA=="
+    crossorigin="anonymous" />
   <style>
     * {
       margin: 0;
@@ -22,18 +26,37 @@
 
     video {
       width: 100%;
+      display: block;
     }
 
     .overlay {
       position: absolute;
-      border-style: solid;
-      border-color: red;
-      border-radius: 2px;
-      color: white;
-      font-size: 20px;
-      font-weight: bold;
-      font-family: monospace;
-      display: none;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+    }
+
+    .left {
+      outline: 0;
+      position: absolute;
+      left: 0px;
+      bottom: 0px;
+      padding: 10px;
+      margin: 20px;
+      font-size: 30px;
+      z-index: 100000;
+      height: 50px;
+      width: 50px;
+      cursor: pointer;
+      color: black;
+      border-radius: 50%;
+      border: 0px solid black;
+      background-color: lightgrey;
+    }
+
+    .red {
+      color: red;
     }
   </style>
 </head>
@@ -42,14 +65,13 @@
   <div id="app" v-cloak>
     <div v-for="(cam, i) in cameras" :key="i">
       <div style="max-width: 100%; position: relative;">
-        <div :id="`overlay_${cam.id}`" class="overlay">
-        </div>
+        <canvas :id="`overlay_${cam.id}`" class="overlay">
+        </canvas>
         <video :id="`player_${cam.id}`" playsinline autoplay muted></video>
       </div>
     </div>
   </div>
   <script>
-    console.log(`main: ${new Date().toISOString()}`);
     new Vue({
       el: "#app",
       data: {
@@ -103,7 +125,7 @@
       },
       async mounted() {
         this.signalr = new signalR.HubConnectionBuilder().withUrl("/msg").build();
-        await this.signalr.start();
+
         this.cameras = await (await fetch("/camera")).json();
 
         this.signalr.on("detected", (cam, summary) => {
@@ -112,33 +134,42 @@
 
           console.log(summary);
 
-          let reset = Date.now();
+          var ctx = el.getContext("2d");
 
-          let pos = summary.detections[0];
+          el.width = el.clientWidth;
+          el.height = el.clientHeight;
 
-          var left = pos.left * 100;
-          var right = pos.right * 100;
-          var top = pos.top * 100;
-          var bottom = pos.bottom * 100;
+          ctx.clearRect(0, 0, el.width, el.height);
+          ctx.stroke();
 
-          el.style.left = `${left}%`;
-          el.style.top = `${top}%`;
-          el.style.width = `${right - left}%`;
-          el.style.height = `${bottom - top}%`;
+          for (const pos of summary.detections.filter(d => d.label == "person")) {
 
-          el.style.display = "block";
+            var startLeft = el.width * pos.left;
+            var startTop = el.height * pos.top;
+            var width = (el.width * pos.right) - startLeft;
+            var height = (el.height * pos.bottom) - startTop;
 
-          el.innerHTML = "<p style='transform: translate(0, -100%); " +
-            "-webkit-text-fill-color: white; -webkit-text-stroke-color: red; " +
-            "-webkit-text-stroke-width: 1px;'> " + pos.label + "</p>";
+            console.log(Math.round(startLeft));
+            console.log(Math.round(startTop));
 
-          // setTimeout(() => {
-          //   if (Date.now() - reset >= 3) {
-          //     el.style.display = "none";
-          //   }
-          // }, 3000);
+            ctx.lineWidth = 4;
 
+            ctx.strokeRect(startLeft, startTop, width, height);
+
+            ctx.fillStyle = "red";
+            ctx.strokeStyle = "black";
+
+            ctx.font = "bold 20px monospace";
+
+            ctx.strokeText(pos.label, startLeft, startTop);
+
+            ctx.fillText(pos.label, startLeft, startTop);
+
+            ctx.stroke();
+          }
         });
+
+        await this.signalr.start();
 
         for (const cam of this.cameras) {
           console.log(cam);

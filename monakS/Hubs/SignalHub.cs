@@ -8,8 +8,10 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using System.Timers;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
+using monakS.BackgroundServices;
 using monakS.FFMPEG;
 using monakS.Models;
 using SIPSorcery.Net;
@@ -32,9 +34,13 @@ namespace monakS.Hubs
   //   }
   // }
 
-  public class ClientMessages
-  {
-  }
+  // public class SignalPublisher
+  // {
+  //   public SignalPublisher(RXEVENT)
+  //   {
+  //     
+  //   }
+  // }
 
   public class WebRtcSignalSession
   {
@@ -42,18 +48,34 @@ namespace monakS.Hubs
       = new ConcurrentDictionary<string, RTCPeerConnection>();
   }
 
-  public class WebRtcSignalHub : Hub
+  public class SignalHub : Hub
   {
     private readonly CameraStreamPool _cameraStreamPool;
-
+    
     private static ConcurrentDictionary<string, WebRtcSignalSession> _sessions =
       new ConcurrentDictionary<string, WebRtcSignalSession>();
 
     public static ConcurrentQueue<RTCPeerConnection> POOL = new ConcurrentQueue<RTCPeerConnection>();
 
-    public WebRtcSignalHub(CameraStreamPool cameraStreamPool)
+    private static ConcurrentBag<IClientProxy> _clients = new ConcurrentBag<IClientProxy>();
+
+    // public static void SendUpdate()
+    // {
+    //   foreach (var client in _clients)
+    //   {
+    //     client.SendAsync("KEKW");
+    //   }
+    // }
+
+    public SignalHub(CameraStreamPool cameraStreamPool)
     {
       _cameraStreamPool = cameraStreamPool;
+    }
+
+    public override Task OnConnectedAsync()
+    {
+      _clients.Add(this.Clients.Caller);
+      return base.OnConnectedAsync();
     }
 
     public string GetSessionId(Camera cam)
@@ -67,43 +89,38 @@ namespace monakS.Hubs
       session.PeerConnections.TryAdd(pc.SessionID, pc);
       var sessionId = pc.SessionID;
 
-      var channel = Channel.CreateBounded<AVPacketHandle>(new BoundedChannelOptions(5)
-      {
-        SingleWriter = true,
-        SingleReader = true,
-        FullMode = BoundedChannelFullMode.DropOldest
-      });
-      
-      Task.Run(async () =>
-      {
-        await foreach (var pkt in channel.Reader.ReadAllAsync())
-        {
-          pc?.SendVideo((uint) pkt.Duration, pkt.Data);
-        }
-      });
+      var src = new CancellationTokenSource();
 
-      pc.onconnectionstatechange += state =>
+      pc.onconnectionstatechange += async state =>
       {
         switch (state)
         {
           case RTCPeerConnectionState.connected:
-            // var frame = _cameraStreamPool.GetLastKeyframe(cam);
-            // SendVideo(frame);
-            _cameraStreamPool.GetOutput(cam, pkt => channel.Writer.TryWrite(pkt));
+            var output = _cameraStreamPool.GetOutput(cam);
+            try
+            {
+              await foreach (var pkt in output.ReadAllAsync(src.Token))
+              {
+                pc?.SendVideo((uint) pkt.Duration, pkt.Data);
+              }
+            }
+            catch (Exception)
+            {
+              // ignored
+            }
+
+            output.Close();
             break;
           case RTCPeerConnectionState.closed:
           case RTCPeerConnectionState.failed:
-          {
             if (session.PeerConnections.TryRemove(sessionId, out _))
             {
               Console.WriteLine("CLOSED: " + sessionId);
-              //channel.Writer.TryComplete();
+              src.Cancel();
               pc.close();
               pc = null;
             }
-
             break;
-          }
         }
       };
 

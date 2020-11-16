@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net;
 using System.Security;
 using Microsoft.AspNetCore.Mvc;
@@ -36,7 +37,7 @@ namespace monakS.Controllers
     [HttpGet("cancel")]
     public IActionResult Cancel()
     {
-      _cameraStreamPool.Stop(new Camera() { Id = 1});
+      _ = _cameraStreamPool.Stop(Startup.CAMERAS.First());
       return Ok();
     }
   }
