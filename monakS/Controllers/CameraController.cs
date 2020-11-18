@@ -37,7 +37,7 @@ namespace monakS.Controllers
     [HttpGet("cancel")]
     public IActionResult Cancel()
     {
-      _ = _cameraStreamPool.Stop(Startup.CAMERAS.First());
+      _cameraStreamPool.Stop(Startup.CAMERAS.First());
       return Ok();
     }
   }

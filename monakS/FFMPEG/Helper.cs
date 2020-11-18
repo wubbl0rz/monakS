@@ -38,7 +38,8 @@ namespace monakS.FFMPEG
     private unsafe AVCodecContext* _h264DecCtx;
     private unsafe AVCodecContext* _jpgEncCtx;
 
-    public DateTime LastMotion { get; private set; }
+    public DateTime LastSuccessfulDetection { get; private set; }
+    public DateTime LastDetectionCheck { get; private set; }
     public event Action<ObjectDetectorSummary, AVPacketHandle> Detected;
 
     public ObjectDetector()
@@ -70,10 +71,11 @@ namespace monakS.FFMPEG
           var summary = JsonConvert.DeserializeObject<ObjectDetectorSummary>(
             await response.Content.ReadAsStringAsync());
 
+          this.LastDetectionCheck = DateTime.Now;
+
           if (summary.Detections.Count > 0)
           {
-            //tuple.cb?.Invoke(summary, jpgImage);
-            this.LastMotion = DateTime.Now;
+            this.LastSuccessfulDetection = this.LastDetectionCheck;
             this.Detected?.Invoke(summary, jpgImage);
           }
         }

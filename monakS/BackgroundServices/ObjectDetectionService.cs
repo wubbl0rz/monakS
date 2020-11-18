@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
@@ -26,7 +27,7 @@ namespace monakS.BackgroundServices
     
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-      _cameraStreamPool.Started += async cam =>
+      _cameraStreamPool.Started += (cam, output) =>
       {
         if (cam.IsObjectDetectionEnabled)
         {
@@ -36,20 +37,14 @@ namespace monakS.BackgroundServices
             _hubContext.Clients.All.SendAsync("detected", cam, summary);
           };
 
-          var output = _cameraStreamPool.GetOutput(cam);
-      
-          await foreach (var pkt in output.ReadAllAsync(stoppingToken))
+          var handle = output.Subscribe(pkt =>
           {
-            // subscribe camera changed event
-            // mal mit rx extension ausprobieren
-            // await 
-            if (pkt.IsKeyframe)
+            var checkTime = objectDetector.LastDetectionCheck.AddMilliseconds(1800);
+            if (pkt.IsKeyframe && checkTime <= DateTime.Now)
             {
               objectDetector.Detect(pkt);
             }
-          }
-          
-          output.Close();
+          });
         }
       };
       

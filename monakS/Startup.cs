@@ -58,12 +58,12 @@ namespace monakS
         Name = "Wohnzimmer",
         StreamUrl = @"rtsp://localhost:8554/mystream"
       },
-      new Camera()
-      {
-        Id = 1,
-        Name = "Flur",
-        StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
-      },
+      // new Camera()
+      // {
+      //   Id = 1,
+      //   Name = "Flur",
+      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
+      // },
       // new Camera()
       // {
       //   Id = 2,

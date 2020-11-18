@@ -7,7 +7,11 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.NetworkInformation;
+using System.Reactive;
+using System.Reactive.Concurrency;
+using System.Reactive.Disposables;
 using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using System.Text;
 using System.Threading;
 using System.Threading.Channels;
@@ -19,6 +23,7 @@ using monakS.Hubs;
 using monakS.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using SCTP4CS.Utils;
 
 namespace monakS.FFMPEG
 {
@@ -30,7 +35,7 @@ namespace monakS.FFMPEG
     private readonly ConcurrentDictionary<int, CameraStream> _streams =
       new ConcurrentDictionary<int, CameraStream>();
 
-    public event Action<Camera> Started;
+    public event Action<Camera, IObservable<AVPacketHandle>> Started;
     public event Action<Camera> Stopped;
 
     public CameraStreamInfo GetOutputInfo(Camera cam)
@@ -46,13 +51,13 @@ namespace monakS.FFMPEG
       return info;
     }
 
-    public CameraOutput GetOutput(Camera cam)
+    public IObservable<AVPacketHandle> GetOutput(Camera cam)
     {
       if (_streams.TryGetValue(cam.Id, out var cameraStream))
       {
-        return new CameraOutput(cameraStream);
+        return cameraStream;
       }
-      
+
       throw new IOException("Camera not found");
     }
 
@@ -62,7 +67,7 @@ namespace monakS.FFMPEG
       _hubContext = hubContext;
     }
 
-    public async Task Stop(Camera cam)
+    public void Stop(Camera cam)
     {
       if (_streams.TryRemove(cam.Id, out var cameraStream))
       {
@@ -86,7 +91,7 @@ namespace monakS.FFMPEG
         if (!connected)
         {
           connected = true;
-          this.Started?.Invoke(cam);
+          this.Started?.Invoke(cam, cameraStream);
         }
       };
 
@@ -113,55 +118,9 @@ namespace monakS.FFMPEG
         _streams.TryRemove(cam.Id, out _);
         this.Stopped?.Invoke(cam);
         cameraStream.Dispose();
-
       });
 
       return true;
-    }
-  }
-
-  public class CameraOutput
-  {
-    private readonly CameraStream _cameraStream;
-    private readonly Action _onClose;
-    private readonly Channel<AVPacketHandle> _channel;
-    public bool IsActive { get; set; } = true;
-
-    public CameraOutput(CameraStream cameraStream, Action onClose = null)
-    {
-      _cameraStream = cameraStream;
-      _onClose = onClose;
-
-      _channel = Channel.CreateBounded<AVPacketHandle>(new BoundedChannelOptions(1)
-      {
-        SingleReader = true, 
-        SingleWriter = true,
-        //FullMode = BoundedChannelFullMode.DropOldest
-      });
-
-      cameraStream.OnNextFrame += WritePacket;
-      cameraStream.OnDispose += this.Close;
-    }
-
-    public IAsyncEnumerable<AVPacketHandle> ReadAllAsync(CancellationToken token = default)
-    {
-      return _channel.Reader.ReadAllAsync(token);
-    }
-
-    private void WritePacket(AVPacketHandle pkt)
-    {
-      _channel.Writer.TryWrite(pkt);
-    }
-
-    public void Close()
-    {
-      if (!this.IsActive)
-        return;
-      this.IsActive = false;
-      _channel.Writer.TryComplete();
-      _cameraStream.OnNextFrame -= WritePacket;
-      this._onClose?.Invoke();
-      Console.WriteLine("CLOSE");
     }
   }
 
@@ -172,7 +131,7 @@ namespace monakS.FFMPEG
     public AVPixelFormat Format { get; set; }
   }
 
-  public class CameraStream : IDisposable
+  public class CameraStream : IDisposable, IObservable<AVPacketHandle>
   {
     private readonly Camera _cam;
 
@@ -333,6 +292,40 @@ namespace monakS.FFMPEG
     {
       this.Reset();
       this.OnDispose?.Invoke();
+    }
+
+    public IDisposable Subscribe(IObserver<AVPacketHandle> observer)
+    {
+      var channel = Channel.CreateBounded<AVPacketHandle>(new BoundedChannelOptions(1)
+      {
+        SingleReader = true,
+        SingleWriter = true,
+        //FullMode = BoundedChannelFullMode.DropOldest
+      });
+
+      void Write(AVPacketHandle pkt) => channel.Writer.TryWrite(pkt);
+      void Close()
+      {
+        this.OnNextFrame -= Write;
+        channel.Writer.TryComplete();
+      }
+
+      this.OnNextFrame += Write;
+      this.OnDispose += Close;
+
+      Task.Run(async () =>
+      {
+        await foreach (var pkt in channel.Reader.ReadAllAsync())
+        {
+          observer.OnNext(pkt);
+        }
+
+        observer.OnCompleted();
+
+        Close();
+      });
+
+      return Disposable.Create(Close);
     }
   }
 }

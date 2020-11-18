@@ -89,34 +89,25 @@ namespace monakS.Hubs
       session.PeerConnections.TryAdd(pc.SessionID, pc);
       var sessionId = pc.SessionID;
 
-      var src = new CancellationTokenSource();
+      IDisposable disposeHandle = null;
 
-      pc.onconnectionstatechange += async state =>
+      pc.onconnectionstatechange += state =>
       {
         switch (state)
         {
           case RTCPeerConnectionState.connected:
             var output = _cameraStreamPool.GetOutput(cam);
-            try
+            disposeHandle = output.Subscribe(pkt =>
             {
-              await foreach (var pkt in output.ReadAllAsync(src.Token))
-              {
-                pc?.SendVideo((uint) pkt.Duration, pkt.Data);
-              }
-            }
-            catch (Exception)
-            {
-              // ignored
-            }
-
-            output.Close();
+              pc?.SendVideo((uint) pkt.Duration, pkt.Data);
+            });
             break;
           case RTCPeerConnectionState.closed:
           case RTCPeerConnectionState.failed:
             if (session.PeerConnections.TryRemove(sessionId, out _))
             {
               Console.WriteLine("CLOSED: " + sessionId);
-              src.Cancel();
+              disposeHandle?.Dispose();
               pc.close();
               pc = null;
             }
