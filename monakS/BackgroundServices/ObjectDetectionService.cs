@@ -1,9 +1,9 @@
 using System;
-using System.IO;
+using System.Linq;
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using monakS.FFMPEG;
@@ -27,27 +27,43 @@ namespace monakS.BackgroundServices
     
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-      _cameraStreamPool.Started += (cam, output) =>
+      _eventBus.Subscribe<CameraStartedMessage>(async msg =>
       {
+        var cam = msg.Cam;
+        var output = msg.Output.ObserveOn(Scheduler.Default);
+        
         if (cam.IsObjectDetectionEnabled)
         {
-          var objectDetector = new ObjectDetector();
+          using var objectDetector = new ObjectDetector();
+          
           objectDetector.Detected += (summary, pkt) =>
           {
             _eventBus.Publish(new DetectionResultMessage() { Cam = cam, Summary = summary});
           };
 
-          var handle = output.Subscribe(pkt =>
+          objectDetector.OnError += error =>
           {
-            var checkTime = objectDetector.LastDetectionCheck.AddMilliseconds(1800);
-            if (pkt.IsKeyframe && checkTime <= DateTime.Now)
+            _log.LogError(error);
+          };
+
+          try
+          {
+            await foreach (var pkt in output.ToAsyncEnumerable().WithCancellation(stoppingToken))
             {
-              objectDetector.Detect(pkt);
+              if (pkt.IsKeyframe && 
+                  objectDetector.LastDetectionCheck.AddMilliseconds(1800) <= DateTime.Now)
+              {
+                objectDetector.Detect(pkt);
+              }
             }
-          });
+          }
+          catch (Exception e) when 
+            (e is TaskCanceledException || e is OperationCanceledException)
+          {
+          }
         }
-      };
-      
+      });
+
       return Task.CompletedTask;
     }
   }

@@ -9,10 +9,4 @@ namespace monakS.Models
     public string Password { get; set; }
     public bool IsObjectDetectionEnabled { get; set; } = true;
   }
-
-  class CameraState
-  {
-    public Camera Camera { get; set; }
-    public bool IsRecording { get; set; }
-  }
 }

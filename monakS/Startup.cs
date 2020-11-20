@@ -1,23 +1,20 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
-using FFmpeg.AutoGen;
+using System.Timers;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using monakS.BackgroundServices;
 using monakS.Data;
 using monakS.FFMPEG;
-using Newtonsoft.Json.Converters;
-using SIPSorcery.Net;
 using monakS.Hubs;
 using monakS.Models;
+using Newtonsoft.Json.Converters;
+using SIPSorcery.Net;
 
 namespace monakS
 {
@@ -38,6 +35,7 @@ namespace monakS
       services.AddSingleton<CameraStreamPool>();
       services.AddSingleton<MessageEventBus>();
       services.AddHostedService<ObjectDetectionService>();
+      services.AddHostedService<CaptureService>();
       services.AddControllers();
       services.AddDbContext<AppDbContext>();
       services.AddCors(options =>
@@ -61,60 +59,42 @@ namespace monakS
         Name = "Wohnzimmer",
         StreamUrl = @"rtsp://localhost:8554/mystream"
       },
-      // new Camera()
-      // {
-      //   Id = 1,
-      //   Name = "Flur",
-      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
-      // },
-      // new Camera()
-      // {
-      //   Id = 2,
-      //   Name = "Wohnzimmer",
-      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
-      // },
-      // new Camera()
-      // {
-      //   Id = 3,
-      //   Name = "Wohnzimmer",
-      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
-      // },
-      // new Camera()
-      // {
-      //   Id = 4,
-      //   Name = "Wohnzimmer",
-      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
-      // },
-      // new Camera()
-      // {
-      //   Id = 5,
-      //   Name = "Wohnzimmer",
-      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
-      // },
-      // new Camera()
-      // {
-      //   Id = 6,
-      //   Name = "Wohnzimmer",
-      //   StreamUrl = @"rtsp://192.168.88.1/flur2.ts"
-      // },
-      // new Camera()
-      // {
-      //   Id = 1,
-      //   Name = "Flur",
-      //   StreamUrl = @"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
-      // },
-      // new Camera()
-      // {
-      //   Id = 2,
-      //   Name = "Hof",
-      //   StreamUrl = @"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
-      // },
-      // new Camera()
-      // {
-      //   Id = 3,
-      //   Name = "Keller",
-      //   StreamUrl = @"rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mov"
-      // },
+      new Camera()
+      {
+        Id = 1,
+        Name = "Wohnzimmer",
+        StreamUrl = @"rtsp://localhost:8554/mystream"
+      },
+      new Camera()
+      {
+        Id = 2,
+        Name = "Wohnzimmer",
+        StreamUrl = @"rtsp://localhost:8554/mystream"
+      },
+      new Camera()
+      {
+        Id = 3,
+        Name = "Wohnzimmer",
+        StreamUrl = @"rtsp://localhost:8554/mystream"
+      },
+      new Camera()
+      {
+        Id = 4,
+        Name = "Wohnzimmer",
+        StreamUrl = @"rtsp://localhost:8554/mystream"
+      },
+      new Camera()
+      {
+        Id = 5,
+        Name = "Wohnzimmer",
+        StreamUrl = @"rtsp://localhost:8554/mystream"
+      },
+      new Camera()
+      {
+        Id = 6,
+        Name = "Wohnzimmer",
+        StreamUrl = @"rtsp://localhost:8554/mystream"
+      },
     };
 
     // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -141,7 +121,7 @@ namespace monakS
         cameraStreamPool.Start(camera);
       }
 
-      var timer = new System.Timers.Timer {AutoReset = false, Interval = 1000};
+      var timer = new Timer {AutoReset = false, Interval = 1000};
       timer.Elapsed += (sender, args) =>
       {
         //GC.Collect();

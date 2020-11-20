@@ -1,20 +1,9 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
-using System.Runtime.CompilerServices;
-using System.Threading;
-using System.Threading.Channels;
-using System.Threading.Tasks;
-using System.Timers;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
 using monakS.BackgroundServices;
 using monakS.FFMPEG;
 using monakS.Models;
@@ -37,9 +26,30 @@ namespace monakS.Hubs
     public override bool ForwardToClients { get; set; } = true;
   }
 
+  public class CaptureStartRequestMessage : EventMessage
+  {
+    public Camera Cam { get; set; }
+    public CaptureTrigger Trigger { get; set; }
+  }
+  
+  public class CaptureStopRequestMessage : EventMessage
+  {
+    public Camera Cam { get; set; }
+    public CaptureTrigger Trigger { get; set; } = CaptureTrigger.Manual;
+  }
+
+  public class CaptureResultMessage : EventMessage
+  {
+    public Camera Cam { get; set; }
+    public CaptureInfo Info { get; set; }
+    public override bool ForwardToClients { get; set; } = true;
+    //public override bool SaveToDb { get; set; } = true;
+  }
+  
   public class CameraStartedMessage : EventMessage
   {
     public Camera Cam { get; set; }
+    public CameraStreamInfo Info { get; set; }
     public IObservable<AVPacketHandle> Output { get; set; }
   }
 

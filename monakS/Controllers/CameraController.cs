@@ -33,7 +33,16 @@ namespace monakS.Controllers
     {
       return Ok(Startup.CAMERAS);
     }
-
+    
+    [HttpGet("record")]
+    public IActionResult Record()
+    {
+      var cam = Startup.CAMERAS.First();
+      Console.WriteLine($"CONTROLLER: {cam.Id}");
+      _eventBus.Publish(new CaptureStartRequestMessage() { Cam = cam, Trigger = CaptureTrigger.Motion});
+      return Ok();
+    }
+    
     [HttpGet("cancel")]
     public IActionResult Cancel()
     {

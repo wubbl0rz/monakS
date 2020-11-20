@@ -25,9 +25,6 @@ namespace monakS.FFMPEG
     private readonly ConcurrentDictionary<int, CameraStream> _streams =
       new ConcurrentDictionary<int, CameraStream>();
 
-    public event Action<Camera, IObservable<AVPacketHandle>> Started;
-    public event Action<Camera> Stopped;
-
     public CameraStreamInfo GetOutputInfo(Camera cam)
     {
       var info = new CameraStreamInfo();
@@ -81,10 +78,14 @@ namespace monakS.FFMPEG
         if (!connected)
         {
           connected = true;
-          this.Started?.Invoke(cam, cameraStream);
           _eventBus.Publish(new CameraStartedMessage()
           {
             Cam = cam,
+            Info = new CameraStreamInfo()
+            {
+              CodecParameters = cameraStream.CodecParameters,
+              TimeBase = cameraStream.TimeBase
+            },
             Output = cameraStream
           });
         }
@@ -111,7 +112,6 @@ namespace monakS.FFMPEG
         }
 
         _streams.TryRemove(cam.Id, out _);
-        this.Stopped?.Invoke(cam);
         cameraStream.Dispose();
       });
 
@@ -296,13 +296,6 @@ namespace monakS.FFMPEG
 
     public IDisposable Subscribe(IObserver<AVPacketHandle> observer)
     {
-      // var channel = Channel.CreateBounded<AVPacketHandle>(new BoundedChannelOptions(1)
-      // {
-      //   SingleReader = true,
-      //   SingleWriter = true,
-      //   //FullMode = BoundedChannelFullMode.DropOldest
-      // });
-
       void Write(AVPacketHandle pkt)
       {
         observer.OnNext(pkt);
@@ -312,25 +305,11 @@ namespace monakS.FFMPEG
       {
         observer.OnCompleted();
         this.OnNextFrame -= Write;
-        //channel.Writer.TryComplete();
       }
 
       this.OnNextFrame += Write;
       this.OnDispose += Close;
-
-      // Task.Run(async () =>
-      // {
-      //   await foreach (var pkt in channel.Reader.ReadAllAsync())
-      //   {
-      //     Console.WriteLine($"CAMERA TASK {Thread.CurrentThread.ManagedThreadId}");
-      //     observer.OnNext(pkt);
-      //   }
-      //
-      //   observer.OnCompleted();
-      //
-      //   Close();
-      // });
-
+      
       return Disposable.Create(Close);
     }
   }

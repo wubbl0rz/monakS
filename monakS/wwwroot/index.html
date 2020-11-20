@@ -8,12 +8,10 @@
   <script src="/signalr.min.js"></script>
   <script src="/adapter.js"></script>
   <script src="/vue.js"></script>
-  <script src="//cdn.jsdelivr.net/npm/eruda"></script>
-  <script>eruda.init();</script>
+  <!-- <script src="//cdn.jsdelivr.net/npm/eruda"></script>
+  <script>eruda.init();</script> -->
   <link rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/5.8.55/css/materialdesignicons.min.css"
-    integrity="sha512-x96qcyADhiw/CZY7QLOo7dB8i/REOEHZDhNfoDuJlyQ+yZzhdy91eAa4EkO7g3egt8obvLeJPoUKEKu5C5JYjA=="
-    crossorigin="anonymous" />
+    href="https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/5.8.55/css/materialdesignicons.min.css" />
   <style>
     * {
       margin: 0;
@@ -121,18 +119,19 @@
           let answer_sdp = pc.localDescription.sdp;
           answer_sdp = answer_sdp.replace("a=fmtp:102 profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1\r\n", "");
           await this.signalr.invoke("setAnswer", session_id, answer_sdp);
-        }
+        },
       },
       async mounted() {
         this.signalr = new signalR.HubConnectionBuilder().withUrl("/msg").build();
 
         this.cameras = await (await fetch("/camera")).json();
 
-        this.signalr.on("detected", (cam, summary) => {
+        this.signalr.on("detectionResultMessage", async msg => {
+
+          let cam = msg.cam;
+          let summary = msg.summary;
 
           let el = document.getElementById(`overlay_${cam.id}`);
-
-          console.log(summary);
 
           var ctx = el.getContext("2d");
 
@@ -143,27 +142,26 @@
           ctx.stroke();
 
           for (const pos of summary.detections.filter(d => d.label == "person")) {
-
             var startLeft = el.width * pos.left;
             var startTop = el.height * pos.top;
             var width = (el.width * pos.right) - startLeft;
             var height = (el.height * pos.bottom) - startTop;
 
-            console.log(Math.round(startLeft));
-            console.log(Math.round(startTop));
-
             ctx.lineWidth = 4;
+
+            ctx.strokeStyle = "#E6007E";
 
             ctx.strokeRect(startLeft, startTop, width, height);
 
-            ctx.fillStyle = "red";
             ctx.strokeStyle = "black";
 
-            ctx.font = "bold 20px monospace";
+            ctx.fillStyle = "#E6007E";
 
-            ctx.strokeText(pos.label, startLeft, startTop);
+            ctx.font = "bold 16px monospace";
 
-            ctx.fillText(pos.label, startLeft, startTop);
+            ctx.strokeText(pos.label.toUpperCase(), startLeft, startTop);
+
+            ctx.fillText(pos.label.toUpperCase(), startLeft, startTop);
 
             ctx.stroke();
           }
