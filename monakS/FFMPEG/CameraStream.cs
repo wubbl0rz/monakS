@@ -1,18 +1,10 @@
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Net.NetworkInformation;
 using System.Reactive;
 using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
-using System.Reactive.Linq;
-using System.Reactive.Subjects;
-using System.Text;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -21,17 +13,15 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using monakS.Hubs;
 using monakS.Models;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using SCTP4CS.Utils;
+
 
 namespace monakS.FFMPEG
 {
   public class CameraStreamPool
   {
     private readonly ILogger<CameraStreamPool> _log;
-    private readonly IHubContext<SignalHub> _hubContext;
-
+    private readonly MessageEventBus _eventBus;
+    
     private readonly ConcurrentDictionary<int, CameraStream> _streams =
       new ConcurrentDictionary<int, CameraStream>();
 
@@ -61,10 +51,10 @@ namespace monakS.FFMPEG
       throw new IOException("Camera not found");
     }
 
-    public CameraStreamPool(ILogger<CameraStreamPool> log, IHubContext<SignalHub> hubContext)
+    public CameraStreamPool(ILogger<CameraStreamPool> log, MessageEventBus eventBus)
     {
       _log = log;
-      _hubContext = hubContext;
+      _eventBus = eventBus;
     }
 
     public void Stop(Camera cam)
@@ -92,6 +82,11 @@ namespace monakS.FFMPEG
         {
           connected = true;
           this.Started?.Invoke(cam, cameraStream);
+          _eventBus.Publish(new CameraStartedMessage()
+          {
+            Cam = cam,
+            Output = cameraStream
+          });
         }
       };
 
@@ -128,7 +123,11 @@ namespace monakS.FFMPEG
   {
     public AVCodecParametersHandle CodecParameters { get; set; }
     public AVRational TimeBase { get; set; }
-    public AVPixelFormat Format { get; set; }
+  }
+
+  interface ICameraStream
+  {
+    public CameraStreamInfo Info { get; set; }
   }
 
   public class CameraStream : IDisposable, IObservable<AVPacketHandle>
@@ -275,14 +274,15 @@ namespace monakS.FFMPEG
 
         _pkt->duration = _pkt->duration == 0 ? (long) (90000 / _frameRate) : _pkt->duration;
 
-        var ms = _pkt->duration *
+        var seconds = _pkt->duration *
                  (_stream->time_base.num / (float) _stream->time_base.den);
 
         OnNextFrame?.Invoke(new AVPacketHandle(_pkt,
           _stream->codecpar->width,
           _stream->codecpar->height,
-          ms,
-          _stream->time_base));
+          seconds,
+          this.TimeBase,
+          this.CodecParameters));
 
         ffmpeg.av_packet_unref(_pkt);
       }
@@ -296,34 +296,40 @@ namespace monakS.FFMPEG
 
     public IDisposable Subscribe(IObserver<AVPacketHandle> observer)
     {
-      var channel = Channel.CreateBounded<AVPacketHandle>(new BoundedChannelOptions(1)
-      {
-        SingleReader = true,
-        SingleWriter = true,
-        //FullMode = BoundedChannelFullMode.DropOldest
-      });
+      // var channel = Channel.CreateBounded<AVPacketHandle>(new BoundedChannelOptions(1)
+      // {
+      //   SingleReader = true,
+      //   SingleWriter = true,
+      //   //FullMode = BoundedChannelFullMode.DropOldest
+      // });
 
-      void Write(AVPacketHandle pkt) => channel.Writer.TryWrite(pkt);
+      void Write(AVPacketHandle pkt)
+      {
+        observer.OnNext(pkt);
+      }
+
       void Close()
       {
+        observer.OnCompleted();
         this.OnNextFrame -= Write;
-        channel.Writer.TryComplete();
+        //channel.Writer.TryComplete();
       }
 
       this.OnNextFrame += Write;
       this.OnDispose += Close;
 
-      Task.Run(async () =>
-      {
-        await foreach (var pkt in channel.Reader.ReadAllAsync())
-        {
-          observer.OnNext(pkt);
-        }
-
-        observer.OnCompleted();
-
-        Close();
-      });
+      // Task.Run(async () =>
+      // {
+      //   await foreach (var pkt in channel.Reader.ReadAllAsync())
+      //   {
+      //     Console.WriteLine($"CAMERA TASK {Thread.CurrentThread.ManagedThreadId}");
+      //     observer.OnNext(pkt);
+      //   }
+      //
+      //   observer.OnCompleted();
+      //
+      //   Close();
+      // });
 
       return Disposable.Create(Close);
     }

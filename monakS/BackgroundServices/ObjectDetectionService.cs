@@ -14,14 +14,14 @@ namespace monakS.BackgroundServices
   public class ObjectDetectionService : BackgroundService
   {
     private readonly CameraStreamPool _cameraStreamPool;
-    private readonly IHubContext<SignalHub> _hubContext;
+    private readonly MessageEventBus _eventBus;
     private readonly ILogger<ObjectDetectionService> _log;
 
     public ObjectDetectionService(CameraStreamPool cameraStreamPool, 
-      IHubContext<SignalHub> hubContext, ILogger<ObjectDetectionService> log)
+      MessageEventBus eventBus, ILogger<ObjectDetectionService> log)
     {
       _cameraStreamPool = cameraStreamPool;
-      _hubContext = hubContext;
+      _eventBus = eventBus;
       _log = log;
     }
     
@@ -34,7 +34,7 @@ namespace monakS.BackgroundServices
           var objectDetector = new ObjectDetector();
           objectDetector.Detected += (summary, pkt) =>
           {
-            _hubContext.Clients.All.SendAsync("detected", cam, summary);
+            _eventBus.Publish(new DetectionResultMessage() { Cam = cam, Summary = summary});
           };
 
           var handle = output.Subscribe(pkt =>

@@ -1,11 +1,9 @@
 using System;
 using System.Linq;
-using System.Net;
-using System.Security;
 using Microsoft.AspNetCore.Mvc;
+using monakS.BackgroundServices;
 using monakS.FFMPEG;
-using monakS.Models;
-using Newtonsoft.Json;
+using monakS.Hubs;
 
 namespace monakS.Controllers
 {
@@ -14,10 +12,12 @@ namespace monakS.Controllers
   public class CameraController : ControllerBase
   {
     private readonly CameraStreamPool _cameraStreamPool;
+    private readonly MessageEventBus _eventBus;
 
-    public CameraController(CameraStreamPool cameraStreamPool)
+    public CameraController(CameraStreamPool cameraStreamPool, MessageEventBus eventBus)
     {
       _cameraStreamPool = cameraStreamPool;
+      _eventBus = eventBus;
     }
     
     [HttpGet("image/{id}")]
@@ -33,7 +33,7 @@ namespace monakS.Controllers
     {
       return Ok(Startup.CAMERAS);
     }
-    
+
     [HttpGet("cancel")]
     public IActionResult Cancel()
     {
