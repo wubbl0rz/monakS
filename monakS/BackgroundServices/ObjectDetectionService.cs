@@ -30,26 +30,32 @@ namespace monakS.BackgroundServices
       _eventBus.Subscribe<CameraStartedMessage>(async msg =>
       {
         var cam = msg.Cam;
-        var output = msg.Output.ObserveOn(Scheduler.Default);
-        
+      
         if (cam.IsObjectDetectionEnabled)
         {
+          var output = msg.Output.ObserveOn(Scheduler.Default);
+          
           using var objectDetector = new ObjectDetector();
           
           objectDetector.Detected += (summary, pkt) =>
           {
             _eventBus.Publish(new DetectionResultMessage() { Cam = cam, Summary = summary});
+            // _eventBus.Publish(new CaptureStartRequestMessage()
+            // {
+            //   Trigger = CaptureTrigger.Motion,
+            //   Cam = cam
+            // });
           };
-
+      
           objectDetector.OnError += error =>
           {
             _log.LogError(error);
           };
-
+      
           try
-          {
+          { 
             await foreach (var pkt in output.ToAsyncEnumerable().WithCancellation(stoppingToken))
-            {
+            { 
               if (pkt.IsKeyframe && 
                   objectDetector.LastDetectionCheck.AddMilliseconds(1800) <= DateTime.Now)
               {

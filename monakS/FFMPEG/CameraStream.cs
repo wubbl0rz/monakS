@@ -2,9 +2,12 @@ using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reactive;
 using System.Reactive.Concurrency;
 using System.Reactive.Disposables;
+using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -186,6 +189,8 @@ namespace monakS.FFMPEG
       _cancel = true;
     }
 
+    private readonly Subject<AVPacketHandle> _event = new Subject<AVPacketHandle>();
+
     public unsafe void Loop()
     {
       Console.WriteLine("Start connect: " + _cam.StreamUrl);
@@ -241,6 +246,8 @@ namespace monakS.FFMPEG
 
       this.OnConnected?.Invoke();
 
+      var sender = _event.NotifyOn(Scheduler.Default);
+      
       while (!_cancel)
       {
         ffmpeg.av_packet_unref(_pkt);
@@ -276,13 +283,15 @@ namespace monakS.FFMPEG
 
         var seconds = _pkt->duration *
                  (_stream->time_base.num / (float) _stream->time_base.den);
-
-        OnNextFrame?.Invoke(new AVPacketHandle(_pkt,
+        
+        var eventPkt = new AVPacketHandle(_pkt,
           _stream->codecpar->width,
           _stream->codecpar->height,
           seconds,
           this.TimeBase,
-          this.CodecParameters));
+          this.CodecParameters);
+
+        sender.OnNext(eventPkt);
 
         ffmpeg.av_packet_unref(_pkt);
       }
@@ -290,27 +299,22 @@ namespace monakS.FFMPEG
 
     public void Dispose()
     {
+      _event.OnCompleted();
       this.Reset();
       this.OnDispose?.Invoke();
     }
 
     public IDisposable Subscribe(IObserver<AVPacketHandle> observer)
     {
-      void Write(AVPacketHandle pkt)
-      {
-        observer.OnNext(pkt);
-      }
+      //subscribe on
+      var o = _event.ObserveOn(Scheduler.Default).Subscribe(observer); 
 
-      void Close()
-      {
-        observer.OnCompleted();
-        this.OnNextFrame -= Write;
-      }
+      return o;
 
-      this.OnNextFrame += Write;
-      this.OnDispose += Close;
-      
-      return Disposable.Create(Close);
+      // return Disposable.Create(() =>
+      // {
+      //   _channels.TryRemove(observer, out _);
+      // });
     }
   }
 }

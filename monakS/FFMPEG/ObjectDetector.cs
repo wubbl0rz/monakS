@@ -80,7 +80,7 @@ namespace monakS.FFMPEG
             this.Detected?.Invoke(summary, jpgImage);
           }
         }
-        catch (Exception e)
+        catch (Exception)
         {
           this.OnError?.Invoke("Could not connect to: " + serviceURL);
         }

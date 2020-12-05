@@ -5,6 +5,8 @@ using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using HotChocolate;
+using HotChocolate.Subscriptions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -37,8 +39,8 @@ namespace monakS.BackgroundServices
 
   public class CaptureJob
   {
-    public CancellationTokenSource TokenSource { get; set; }
-    public Task Task { get; set; }
+    public CancellationTokenSource TokenSource { get; set; } = new CancellationTokenSource();
+    public Task<bool> Task { get; set; }
     public Camera Cam { get; set; }
     public CaptureTrigger Trigger { get; set; }
     public CaptureInfo Info { get; set; }
@@ -47,6 +49,11 @@ namespace monakS.BackgroundServices
     {
       this.Cam = cam;
       this.Trigger = trigger;
+
+      if (trigger == CaptureTrigger.Motion)
+      {
+        this.TokenSource.CancelAfter(30000);
+      }
 
       this.Info = new CaptureInfo()
       {
@@ -67,8 +74,8 @@ namespace monakS.BackgroundServices
   public class CaptureService : BackgroundService
   {
     private readonly MessageEventBus _eventBus;
-    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<CaptureService> _log;
+    private readonly IServiceProvider _serviceProvider;
     private CancellationToken _shutdownToken;
 
     private readonly ConcurrentDictionary<int, IObservable<AVPacketHandle>> _timeshiftBuffers =
@@ -113,11 +120,12 @@ namespace monakS.BackgroundServices
       return true;
     }
 
-    public CaptureService(MessageEventBus eventBus, IServiceProvider serviceProvider, ILogger<CaptureService> log)
+    public CaptureService(MessageEventBus eventBus,
+      ILogger<CaptureService> log, IServiceProvider serviceProvider)
     {
       _eventBus = eventBus;
-      _serviceProvider = serviceProvider;
       _log = log;
+      _serviceProvider = serviceProvider;
     }
 
     private async void HandleCameraStarted(CameraStartedMessage msg)
@@ -132,7 +140,8 @@ namespace monakS.BackgroundServices
 
       _timeshiftBuffers.TryAdd(cam.Id, replay);
 
-      await replay.LastAsync();
+      // geht das ?
+      await replay.LastOrDefaultAsync();
 
       _timeshiftBuffers.TryRemove(cam.Id, out _);
     }
@@ -145,12 +154,9 @@ namespace monakS.BackgroundServices
 
       if (!_timeshiftBuffers.TryGetValue(cam.Id, out var buffer))
         return;
-
-      var src = CancellationTokenSource.CreateLinkedTokenSource(_shutdownToken);
-
-      if (trigger == CaptureTrigger.Motion)
-        src.CancelAfter(2000);
       
+      //src.Token.Register()
+
       var job = new CaptureJob(cam, trigger);
       var captureInfo = job.Info;
 
@@ -164,7 +170,12 @@ namespace monakS.BackgroundServices
         return;
       }
 
-      var result = await this.StartCapture(captureInfo.Name, buffer, src.Token);
+      //todo: include this in capturejob
+      job.Task = this.StartCapture(captureInfo.Name, buffer, job.TokenSource.Token);
+
+      this.SendEvent(captureInfo);
+
+      var result = await job.Task;
 
       _active.TryRemove(key, out _);
 
@@ -172,44 +183,41 @@ namespace monakS.BackgroundServices
       captureInfo.End = DateTime.Now;
       captureInfo.IsActive = false;
 
-      this.SendAndSaveResult(captureInfo);
+      this.SendEvent(captureInfo);
     }
 
-    private void SendAndSaveResult(CaptureInfo info)
+    private void SendEvent(CaptureInfo info)
     {
       using var scope = _serviceProvider.CreateScope();
       using var ctx = scope.ServiceProvider.GetService<AppDbContext>();
+      
+      var entity = ctx.Update(info);
+      ctx.SaveChanges();
 
-      _eventBus.Publish(new CaptureResultMessage()
+      _eventBus.Publish(new CaptureStatusMessage()
       {
-        Cam = info.Cam,
         Info = info,
       });
-
-      //ctx.CaptureInfos.Add(info); // lol changes id
-      //ctx.SaveChanges();
     }
 
-    private void HandleStopRequest(CaptureStopRequestMessage msg)
+    private async void HandleStopRequest(CaptureStopRequestMessage msg)
     {
       var cam = msg.Cam;
       var trigger = msg.Trigger;
       var key = (cam.Id, trigger);
 
-      if (_active.TryGetValue(key, out var captureInfo))
+      if (_active.TryGetValue(key, out var job))
       {
-        captureInfo.TokenSource.Cancel();
+        await job.Cancel();
       }
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
       _shutdownToken = stoppingToken;
-
+      
       _eventBus.Subscribe<CameraStartedMessage>(this.HandleCameraStarted);
-
       _eventBus.Subscribe<CaptureStartRequestMessage>(this.HandleStartRequest);
-
       _eventBus.Subscribe<CaptureStopRequestMessage>(this.HandleStopRequest);
 
       return Task.CompletedTask;
