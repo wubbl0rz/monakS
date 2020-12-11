@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using monakS.FFMPEG;
 using monakS.Hubs;
+using monakS.Models;
 
 namespace monakS.BackgroundServices
 {
@@ -17,6 +19,8 @@ namespace monakS.BackgroundServices
     private readonly MessageEventBus _eventBus;
     private readonly ILogger<ObjectDetectionService> _log;
 
+    private CancellationToken shutdownToken;
+
     public ObjectDetectionService(CameraStreamPool cameraStreamPool, 
       MessageEventBus eventBus, ILogger<ObjectDetectionService> log)
     {
@@ -25,50 +29,95 @@ namespace monakS.BackgroundServices
       _log = log;
     }
     
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    private ConcurrentDictionary<Camera, CancellationTokenSource> _active = 
+      new ConcurrentDictionary<Camera, CancellationTokenSource>();
+
+    private void StopDetection(int camId)
     {
-      _eventBus.Subscribe<CameraStartedMessage>(async msg =>
+      var (cam, src) = 
+        _active.FirstOrDefault(c => c.Key.Id == camId);
+      
+      if (cam != null)
       {
-        var cam = msg.Cam;
-      
-        if (cam.IsObjectDetectionEnabled)
+        src.Cancel();
+      }
+    }
+
+    private async void StartDetection(Camera cam)
+    {
+      if (cam.IsObjectDetectionEnabled)
+      {
+        var src = CancellationTokenSource.CreateLinkedTokenSource(this.shutdownToken);
+        if (!_active.TryAdd(cam, src))
+          return;
+        
+        var output = 
+          _cameraStreamPool.GetOutput(cam).ObserveOn(Scheduler.Default);
+          
+        using var objectDetector = new ObjectDetector();
+          
+        objectDetector.Detected += (summary, pkt) =>
         {
-          var output = msg.Output.ObserveOn(Scheduler.Default);
-          
-          using var objectDetector = new ObjectDetector();
-          
-          objectDetector.Detected += (summary, pkt) =>
-          {
-            _eventBus.Publish(new DetectionResultMessage() { Cam = cam, Summary = summary});
-            // _eventBus.Publish(new CaptureStartRequestMessage()
-            // {
-            //   Trigger = CaptureTrigger.Motion,
-            //   Cam = cam
-            // });
-          };
+          _eventBus.Publish(new DetectionResultMessage() { Cam = cam, Summary = summary});
+          // _eventBus.Publish(new CaptureStartRequestMessage()
+          // {
+          //   Trigger = CaptureTrigger.Motion,
+          //   Cam = cam
+          // });
+        };
       
-          objectDetector.OnError += error =>
-          {
-            _log.LogError(error);
-          };
+        objectDetector.OnError += error =>
+        {
+          _log.LogError(error);
+        };
       
-          try
-          { 
-            await foreach (var pkt in output.ToAsyncEnumerable().WithCancellation(stoppingToken))
-            { 
-              if (pkt.IsKeyframe && 
-                  objectDetector.LastDetectionCheck.AddMilliseconds(1800) <= DateTime.Now)
-              {
-                objectDetector.Detect(pkt);
-              }
+        try
+        { 
+          await foreach (var pkt in output.
+            ToAsyncEnumerable().WithCancellation(src.Token))
+          {
+            if (pkt.IsKeyframe && 
+                objectDetector.LastDetectionCheck.AddMilliseconds(1800) <= DateTime.Now)
+            {
+              objectDetector.Detect(pkt);
             }
           }
-          catch (Exception e) when 
-            (e is TaskCanceledException || e is OperationCanceledException)
-          {
-          }
+        }
+        catch (Exception e) when 
+          (e is TaskCanceledException || e is OperationCanceledException)
+        {
+        }
+
+        _active.TryRemove(cam, out _);
+      }
+    }
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+      this.shutdownToken = stoppingToken;
+      
+      _eventBus.Subscribe<CameraStartedMessage>(msg =>
+      {
+        if (msg.Cam.IsObjectDetectionEnabled)
+          this.StartDetection(msg.Cam);
+      });
+      
+      _eventBus.Subscribe<CameraUpdatedMessage>(msg =>
+      {
+        if (msg.OldCam.IsObjectDetectionEnabled && !msg.UpdatedCam.IsObjectDetectionEnabled)
+        {
+          this.StopDetection(msg.UpdatedCam.Id);
+        }
+        else if (!msg.OldCam.IsObjectDetectionEnabled && msg.UpdatedCam.IsObjectDetectionEnabled)
+        {
+          this.StartDetection(msg.UpdatedCam);
         }
       });
+      
+      // _eventBus.Subscribe<ObjectDetectionDisabledMessage>(msg =>
+      // {
+      //   this.StopDetection(msg.Cam.Id);
+      // });
 
       return Task.CompletedTask;
     }

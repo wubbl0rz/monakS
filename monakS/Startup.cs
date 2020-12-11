@@ -47,6 +47,7 @@ namespace monakS
         .AddFiltering()
         .AddSorting()
         .AddSubscriptionType<Subscription>()
+        .AddMutationType<Mutation>() 
         .AddInMemorySubscriptions();
 
       services.AddControllers().AddNewtonsoftJson(options =>
@@ -79,10 +80,7 @@ namespace monakS
     public void Configure(IApplicationBuilder app,
       IWebHostEnvironment env, 
       CameraStreamPool cameraStreamPool, 
-      AppDbContext ctx,
-      [Service] ITopicEventReceiver eventReceiver,
-      [Service] ITopicEventSender eventSender
-      )
+      AppDbContext ctx)
     {
       // var pc = new RTCPeerConnection(null);
       // var r = new WeakReference(pc);
@@ -94,45 +92,15 @@ namespace monakS
       ctx.Database.EnsureDeleted();
       ctx.Database.EnsureCreated();
 
-      var CAMERAS = new List<Camera>()
-      {
-        new Camera()
-        {
-          Name = "Wohnzimmer",
-          StreamUrl = @"rtsp://192.168.2.120:8554/mystream",
-          IsObjectDetectionEnabled = true,
-        },
-        new Camera()
-        {
-          Name = "Wohnzimmer",
-          StreamUrl = @"rtsp://192.168.2.120:8554/mystream"
-        },
-        new Camera()
-        {
-          Name = "Wohnzimmer",
-          StreamUrl = @"rtsp://192.168.2.120:8554/mystream"
-        },
-        new Camera()
-        {
-          Name = "Wohnzimmer",
-          StreamUrl = @"rtsp://192.168.2.120:8554/mystream"
-        },
-        new Camera()
-        {
-          Name = "Wohnzimmer",
-          StreamUrl = @"rtsp://192.168.2.120:8554/mystream"
-        },
-      };
-
-      foreach (var cam in CAMERAS)
-      {
-        ctx.Cameras.Add(cam);
-      }
-
-      ctx.SaveChanges();
-      
-      
       //Parallel.For(0, 200, i => { MessageHub.POOL.Enqueue(new RTCPeerConnection(conf)); });
+
+      // ctx.Cameras.Add(new Camera()
+      // {
+      //   Name = "Test",
+      //   StreamUrl = "rtsp://192.168.2.120:8554/mystream",
+      //   IsObjectDetectionEnabled = true
+      // });
+      // ctx.SaveChanges();
 
       foreach (var camera in ctx.Cameras.ToArray())
       {

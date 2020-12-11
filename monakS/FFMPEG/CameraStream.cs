@@ -24,7 +24,7 @@ namespace monakS.FFMPEG
   {
     private readonly ILogger<CameraStreamPool> _log;
     private readonly MessageEventBus _eventBus;
-    
+
     private readonly ConcurrentDictionary<int, CameraStream> _streams =
       new ConcurrentDictionary<int, CameraStream>();
 
@@ -65,7 +65,7 @@ namespace monakS.FFMPEG
       }
     }
 
-    public bool Start(Camera cam)
+    public bool Start(Camera cam, bool retry = true)
     {
       var cameraStream = new CameraStream(cam);
       var created = _streams.TryAdd(cam.Id, cameraStream);
@@ -108,6 +108,12 @@ namespace monakS.FFMPEG
           catch (Exception ex)
           {
             _log.LogWarning(ex.Message);
+
+            _eventBus.Publish(new CameraFailedMessage() {Cam = cam});
+
+            if (!retry)
+              break;
+
             cameraStream.Reset();
           }
 
@@ -116,6 +122,7 @@ namespace monakS.FFMPEG
 
         _streams.TryRemove(cam.Id, out _);
         cameraStream.Dispose();
+        _eventBus.Publish(new CameraStoppedMessage() {Cam = cam});
       });
 
       return true;
@@ -136,8 +143,6 @@ namespace monakS.FFMPEG
   public class CameraStream : IDisposable, IObservable<AVPacketHandle>
   {
     private readonly Camera _cam;
-
-    public event Action<AVPacketHandle> OnNextFrame;
     public event Action OnConnected;
     public event Action OnDispose;
 
@@ -193,6 +198,9 @@ namespace monakS.FFMPEG
 
     public unsafe void Loop()
     {
+      if (_cancel)
+        return;
+
       Console.WriteLine("Start connect: " + _cam.StreamUrl);
       AVDictionary* dict = null;
       ffmpeg.av_dict_set(&dict, "rtsp_transport", "tcp", 0);
@@ -247,7 +255,7 @@ namespace monakS.FFMPEG
       this.OnConnected?.Invoke();
 
       var sender = _event.NotifyOn(Scheduler.Default);
-      
+
       while (!_cancel)
       {
         ffmpeg.av_packet_unref(_pkt);
@@ -282,8 +290,8 @@ namespace monakS.FFMPEG
         _pkt->duration = _pkt->duration == 0 ? (long) (90000 / _frameRate) : _pkt->duration;
 
         var seconds = _pkt->duration *
-                 (_stream->time_base.num / (float) _stream->time_base.den);
-        
+                      (_stream->time_base.num / (float) _stream->time_base.den);
+
         var eventPkt = new AVPacketHandle(_pkt,
           _stream->codecpar->width,
           _stream->codecpar->height,
@@ -307,7 +315,7 @@ namespace monakS.FFMPEG
     public IDisposable Subscribe(IObserver<AVPacketHandle> observer)
     {
       //subscribe on
-      var o = _event.ObserveOn(Scheduler.Default).Subscribe(observer); 
+      var o = _event.ObserveOn(Scheduler.Default).Subscribe(observer);
 
       return o;
 

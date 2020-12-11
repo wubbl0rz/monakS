@@ -1,5 +1,7 @@
 using System;
 using System.Linq;
+using System.Reactive.Linq;
+using System.Reactive.Threading.Tasks;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
@@ -26,28 +28,6 @@ namespace monakS.Controllers
       _eventBus = eventBus;
       _ctx = ctx;
     }
-    
-    [HttpGet("image/{id}")]
-    public IActionResult GetImage(int id)
-    {
-      // var bytes = Startup.ThumbnailJPEG;
-      // return File(bytes, "image/webp");
-      return Ok();
-    }
-    
-    [HttpGet("{id}/active")]
-    public IActionResult ActiveCaptures(int id)
-    {
-      Console.WriteLine(id);
-      
-      var result = _ctx.CaptureInfos
-        .AsQueryable()
-        .Include(c => c.Cam)
-        .Where(c => c.Cam.Id == id && c.IsActive)
-        .ToArray();
-      
-      return Ok(result);
-    }
 
     [HttpGet()]
     public IActionResult Index()
@@ -55,37 +35,90 @@ namespace monakS.Controllers
       return Ok(_ctx.Cameras.ToArray());
     }
 
-    [HttpPost()]
-    public IActionResult Add(Camera cam)
+    [HttpDelete]
+    public IActionResult Remove(Camera cam)
     {
-      cam.SetupMode = true;
-      _ctx.Cameras.Add(cam);
+      
+      //todo: das funzt so nicht
+      _cameraStreamPool.Stop(cam);
+      _ctx.Remove(cam);
+      _ctx.SaveChanges();
+      _eventBus.Publish(new CameraUpdatedMessage()
+      {
+        OldCam = cam,
+        UpdatedCam = null
+      });
+      return Ok();
+    }
+
+    [HttpPut("{id}")]
+    public IActionResult Update(Camera updatedCam)
+    {
+      if (updatedCam == null)
+        return BadRequest();
+
+      var cam = _ctx.Cameras.Find(updatedCam.Id);
+
+      if (cam == null)
+        return BadRequest();
+      
+      _ctx.Entry(cam).State = EntityState.Detached;
+
+      _ctx.Update(updatedCam);
       _ctx.SaveChanges();
 
+      _eventBus.Publish(new CameraUpdatedMessage()
+      {
+        OldCam = cam,
+        UpdatedCam = updatedCam
+      });
+      
       return Ok(cam);
     }
 
-    [HttpGet("record")]
-    public IActionResult Record()
+    [HttpPost]
+    public async Task<IActionResult> Add(Camera cam)
     {
-      var cam = _ctx.Cameras.First(); 
-      _eventBus.Publish(new CaptureStartRequestMessage() { Cam = cam, Trigger = CaptureTrigger.Manual});
-      return Ok();
-    }
-    
-    [HttpGet("recordc")]
-    public IActionResult RecordC()
-    {
-      var cam = _ctx.Cameras.First(); 
-      _eventBus.Publish(new CaptureStopRequestMessage() { Cam = cam, Trigger = CaptureTrigger.Manual});
-      return Ok();
-    }
-    
-    [HttpGet("cancel")]
-    public IActionResult Cancel()
-    {
-      _cameraStreamPool.Stop(_ctx.Cameras.First());
-      return Ok();
+      cam = new Camera()
+      {
+        Name = cam.Name,
+        User = cam.User,
+        StreamUrl = cam.StreamUrl,
+        SetupMode = true,
+        IsObjectDetectionEnabled = false,
+      };
+
+      await _ctx.AddAsync(cam);
+      await _ctx.SaveChangesAsync();
+
+      var tcs = new TaskCompletionSource<bool>();
+
+      _eventBus.Subscribe<CameraFailedMessage>(msg =>
+      {
+        if (msg.Cam.Id == cam.Id)
+          tcs.TrySetResult(false);
+      });
+
+      _eventBus.Subscribe<CameraStartedMessage>(msg =>
+      {
+        if (msg.Cam.Id == cam.Id)
+          tcs.TrySetResult(true);
+      });
+
+      if (_cameraStreamPool.Start(cam) && await tcs.Task)
+      {
+        _eventBus.Publish(new CameraUpdatedMessage()
+        {
+          UpdatedCam = cam
+        });
+        return Ok(cam);
+      }
+
+      _cameraStreamPool.Stop(cam);
+      _ctx.Remove(cam);
+      await _ctx.SaveChangesAsync();
+
+      return BadRequest();
     }
   }
 }

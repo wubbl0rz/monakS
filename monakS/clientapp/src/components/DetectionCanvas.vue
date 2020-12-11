@@ -14,6 +14,7 @@ export default {
   },
   methods: {
     detectionResult(msg) {
+      console.log(msg);
       let cam = msg.cam;
       let summary = msg.summary;
 
@@ -66,11 +67,11 @@ export default {
       }
     },
   },
-  async mounted() {
-    this.SIGNAL_R.on("detectionResultMessage", this.detectionResult);
+  mounted() {
+    this.SIGNAL_R.on("OnDetectionResult", this.detectionResult);
   },
   beforeDestroy() {
-    this.SIGNAL_R.off("detectionResultMessage", this.detectionResult);
+    this.SIGNAL_R.off("OnDetectionResult", this.detectionResult);
   },
   data: () => ({
     visible: false,

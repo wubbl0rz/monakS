@@ -1,5 +1,13 @@
 <template>
   <div class="home">
+    <v-btn
+      @click="$router.push('setup')"
+      v-show="cameras != null && cameras.length == 0"
+      color="primary"
+    >
+      Add Camera
+      <v-icon> mdi-camera-plus </v-icon>
+    </v-btn>
     <div v-for="(cam, i) in cameras" :key="i">
       <VideoPlayer :cam="cam" :stream="streams[cam.id]" />
     </div>
@@ -16,20 +24,24 @@ export default {
     VideoPlayer,
   },
   apollo: {
-    cameras: {
-      query: gql`
-        query {
-          cameras {
-            name
-            id
-            isObjectDetectionEnabled
+    $subscribe: {
+      cameras: {
+        query: gql`
+          subscription {
+            onCamerasChanged {
+              name
+              id
+              isObjectDetectionEnabled
+            }
           }
-        }
-      `,
-      async result(data) {
-        for (const cam of this.cameras) {
-          await this.connect(cam);
-        }
+        `,
+        async result({ data }) {
+          this.cameras = data.onCamerasChanged;
+          this.streams = [];
+          for (const cam of this.cameras) {
+            await this.connect(cam);
+          }
+        },
       },
     },
   },
@@ -70,6 +82,17 @@ export default {
   },
   data: () => ({
     streams: [],
+    cameras: [],
   }),
 };
 </script>
+
+<style scoped>
+.v-btn {
+  position: absolute;
+  user-select: none;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, 0%);
+}
+</style>

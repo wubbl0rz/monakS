@@ -44,9 +44,11 @@
     <video
       v-hold.500="
         () => {
-          overlay = !overlay;
+          if (isInteractive) overlay = !overlay;
         }
       "
+      @loadeddata="playing"
+      ref="player"
       autoplay
       muted
       playsinline
@@ -63,7 +65,10 @@ export default {
   name: "VideoPlayer",
   props: {
     stream: MediaStream,
-    isInteractive: Boolean,
+    isInteractive: {
+      default: true,
+      type: Boolean,
+    },
     cam: Object,
   },
   components: {
@@ -108,7 +113,6 @@ export default {
         },
         updateQuery: function (previousResult, { subscriptionData }) {
           let captures = subscriptionData.data.onActiveCapturesChanged;
-          console.log(captures);
           captures = captures.filter((c) => c.cam.id == this.cam.id);
 
           return {
@@ -141,6 +145,9 @@ export default {
     },
   },
   methods: {
+    playing() {
+      this.$emit("playing");
+    },
     toggleCapture() {
       if (this.manualCaptureActive) {
         this.SIGNAL_R.invoke("stopCapture", this.cam);

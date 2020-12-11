@@ -64,6 +64,22 @@ namespace monakS.Hubs
     public CameraStreamInfo Info { get; set; }
     public IObservable<AVPacketHandle> Output { get; set; }
   }
+  
+  public class CameraUpdatedMessage : EventMessage
+  {
+    public Camera OldCam { get; set; } = new Camera();
+    public Camera UpdatedCam { get; set; }
+  }
+
+  public class CameraFailedMessage : EventMessage
+  {
+    public Camera Cam { get; set; }
+  }
+  
+  public class CameraStoppedMessage : EventMessage
+  {
+    public Camera Cam { get; set; }
+  }
 
   public class MessageEventBus : IObservable<EventMessage>
   {
@@ -85,14 +101,15 @@ namespace monakS.Hubs
     {
       _subject.OnNext(msg);
 
-      Console.WriteLine("================");
-      Console.WriteLine(msg);
-      Console.WriteLine("================");
-      
       if (msg.ForwardToClients)
       {
         var typeName = msg.GetType().Name;
         var topic = $"On{typeName.Replace("Message", "")}";
+        
+        Console.WriteLine("================");
+        Console.WriteLine(topic);
+        Console.WriteLine("================");
+        
         _hubContext.Clients.All.SendAsync(topic, msg);
       }
     }
@@ -111,7 +128,7 @@ namespace monakS.Hubs
         {
           var result = await enumerator.MoveNextAsync();
         }
-        catch (OperationCanceledException e)
+        catch (OperationCanceledException)
         {
           break;
         }
