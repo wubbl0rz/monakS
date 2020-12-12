@@ -29,7 +29,7 @@ namespace monakS.Data.GraphQL
     {
       Camera[] MakeDbQuery()
       {
-        return ctx.Cameras.AsNoTracking().ToArray();
+        return ctx.Cameras.AsNoTracking().Where(c => !c.SetupMode).ToArray();
       }
       
       yield return MakeDbQuery();

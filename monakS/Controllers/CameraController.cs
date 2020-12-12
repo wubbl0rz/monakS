@@ -38,8 +38,6 @@ namespace monakS.Controllers
     [HttpDelete]
     public IActionResult Remove(Camera cam)
     {
-      
-      //todo: das funzt so nicht
       _cameraStreamPool.Stop(cam);
       _ctx.Remove(cam);
       _ctx.SaveChanges();
@@ -107,6 +105,8 @@ namespace monakS.Controllers
 
       if (_cameraStreamPool.Start(cam) && await tcs.Task)
       {
+        cam.SetupMode = false;
+        await _ctx.SaveChangesAsync();
         _eventBus.Publish(new CameraUpdatedMessage()
         {
           UpdatedCam = cam

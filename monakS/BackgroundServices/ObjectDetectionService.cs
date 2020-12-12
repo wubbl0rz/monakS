@@ -104,21 +104,19 @@ namespace monakS.BackgroundServices
       
       _eventBus.Subscribe<CameraUpdatedMessage>(msg =>
       {
-        if (msg.OldCam.IsObjectDetectionEnabled && !msg.UpdatedCam.IsObjectDetectionEnabled)
+        var oldEnabled = msg.OldCam?.IsObjectDetectionEnabled ?? false; 
+        var updatedEnabled = msg.UpdatedCam?.IsObjectDetectionEnabled ?? false;
+        
+        if (oldEnabled && !updatedEnabled)
         {
-          this.StopDetection(msg.UpdatedCam.Id);
+          this.StopDetection(msg.OldCam.Id);
         }
-        else if (!msg.OldCam.IsObjectDetectionEnabled && msg.UpdatedCam.IsObjectDetectionEnabled)
+        else if (!oldEnabled && updatedEnabled)
         {
           this.StartDetection(msg.UpdatedCam);
         }
       });
       
-      // _eventBus.Subscribe<ObjectDetectionDisabledMessage>(msg =>
-      // {
-      //   this.StopDetection(msg.Cam.Id);
-      // });
-
       return Task.CompletedTask;
     }
   }

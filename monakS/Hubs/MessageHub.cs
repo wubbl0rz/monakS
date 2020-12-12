@@ -67,7 +67,7 @@ namespace monakS.Hubs
   
   public class CameraUpdatedMessage : EventMessage
   {
-    public Camera OldCam { get; set; } = new Camera();
+    public Camera OldCam { get; set; }
     public Camera UpdatedCam { get; set; }
   }
 

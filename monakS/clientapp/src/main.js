@@ -2,6 +2,7 @@ import Vue from 'vue'
 import App from './App.vue'
 import router from './router'
 import vuetify from './plugins/vuetify';
+import adapter from 'webrtc-adapter';
 import { HubConnectionBuilder } from "@microsoft/signalr";
 import { createProvider } from './vue-apollo'
 
@@ -16,6 +17,44 @@ let SIGNAL_R = new HubConnectionBuilder()
   .build();
 
 Vue.prototype.SIGNAL_R = SIGNAL_R;
+
+Vue.prototype.ADAPTER = adapter;
+
+Vue.prototype.WEBRTC_CONNECT = async (cam) => {
+  return new Promise(async (resolve, reject) => {
+    let pc = new RTCPeerConnection();
+
+    pc.ontrack = async (t) => {
+      let stream = t.streams[0];
+      resolve(stream);
+    };
+
+    pc.onicecandidate = async (e) => {
+      if (e.candidate) {
+        await SIGNAL_R.invoke("setCandidate", session_id, e.candidate);
+      }
+    };
+
+    let session_id = await SIGNAL_R.invoke("getSessionId", cam);
+
+    let offer_sdp = await SIGNAL_R.invoke("getOffer", session_id);
+
+    await pc.setRemoteDescription({
+      type: "offer",
+      sdp: offer_sdp,
+    });
+
+    let answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    let answer_sdp = pc.localDescription.sdp;
+    answer_sdp = answer_sdp.replace(
+      "a=fmtp:102 profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1\r\n",
+      ""
+    );
+    await SIGNAL_R.invoke("setAnswer", session_id, answer_sdp);
+  });
+}
 
 Vue.directive("hold", {
   bind: function (el, binding) {

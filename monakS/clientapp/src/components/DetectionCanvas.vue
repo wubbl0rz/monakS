@@ -1,8 +1,10 @@
 <template>
   <div style="pointer-events: none">
-    <transition name="fade">
-      <canvas class="overlay" ref="canvas"></canvas>
-    </transition>
+    <div ref="container" class="overlay">
+      <transition name="fade">
+        <canvas v-show="visible" class="overlay" ref="canvas"></canvas>
+      </transition>
+    </div>
   </div>
 </template>
 
@@ -14,7 +16,6 @@ export default {
   },
   methods: {
     detectionResult(msg) {
-      console.log(msg);
       let cam = msg.cam;
       let summary = msg.summary;
 
@@ -23,21 +24,18 @@ export default {
       }
 
       let el = this.$refs.canvas;
+      let container = this.$refs.container;
       var ctx = el.getContext("2d");
-      el.width = el.clientWidth;
-      el.height = el.clientHeight;
-
-      this.visible = true;
+      el.width = container.clientWidth;
+      el.height = container.clientHeight;
 
       this.lastMsg = msg;
 
       setTimeout(() => {
         if (this.lastMsg == msg) {
-          ctx.clearRect(0, 0, el.width, el.height);
-          ctx.stroke();
           this.visible = false;
         }
-      }, 2000);
+      }, 4000);
 
       ctx.clearRect(0, 0, el.width, el.height);
       ctx.stroke();
@@ -65,6 +63,8 @@ export default {
         ctx.fillText(pos.label.toUpperCase(), startLeft, startTop);
         ctx.stroke();
       }
+
+      this.visible = true;
     },
   },
   mounted() {
@@ -90,9 +90,11 @@ export default {
   z-index: 5;
 }
 
-.fade-enter-active,
-.fade-leave-active {
+.fade-enter-active {
   transition: opacity 0.5s;
+}
+.fade-leave-active {
+  transition: opacity 2s;
 }
 
 .fade-enter,

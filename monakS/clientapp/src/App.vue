@@ -1,5 +1,5 @@
 <template>
-  <v-app>
+  <v-app v-cloak>
     <v-main>
       <router-view></router-view>
     </v-main>
@@ -25,5 +25,14 @@ export default {
 html::-webkit-scrollbar {
   width: 0;
   height: 0;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+[v-cloak] {
+  display: none;
 }
 </style>

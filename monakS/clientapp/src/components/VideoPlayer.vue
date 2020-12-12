@@ -35,16 +35,39 @@
       fab
       absolute
       left
+      v-bind="btnSize"
       style="bottom: 20px"
       @click="toggleCapture(cam)"
     >
       <v-icon>mdi-camera</v-icon>
     </v-btn>
 
+    <v-btn
+      v-show="overlay"
+      color="primary"
+      dark
+      fab
+      absolute
+      left
+      style="bottom: 20px; left: 90px"
+      @click="$emit('show-files')"
+    >
+      <v-icon>mdi-folder-search</v-icon>
+    </v-btn>
+
+    <v-overlay absolute :value="loading">
+      <v-progress-circular indeterminate size="64"></v-progress-circular>
+    </v-overlay>
+
     <video
       v-hold.500="
         () => {
           if (isInteractive) overlay = !overlay;
+        }
+      "
+      v-hold.1500="
+        () => {
+          longPress();
         }
       "
       @loadeddata="playing"
@@ -136,6 +159,15 @@ export default {
     },
   },
   computed: {
+    btnSize() {
+      const size = {
+        xs: "default",
+        sm: "default",
+        lg: "large",
+        xl: "x-large",
+      }[this.$vuetify.breakpoint.name];
+      return size ? { [size]: true } : {};
+    },
     captureActive() {
       return (
         this.motionCaptureActive ||
@@ -145,8 +177,12 @@ export default {
     },
   },
   methods: {
+    longPress() {
+      console.log(1);
+    },
     playing() {
       this.$emit("playing");
+      this.loading = false;
     },
     toggleCapture() {
       if (this.manualCaptureActive) {
@@ -181,7 +217,8 @@ export default {
     },
   },
   data: () => ({
-    overlay: false,
+    loading: true,
+    overlay: true,
     motionCaptureActive: false,
     manualCaptureActive: false,
     timerCaptureActive: false,
@@ -192,6 +229,7 @@ export default {
 <style scoped>
 video {
   width: 100%;
+  max-height: 100vh;
 }
 
 .fade-enter-active,

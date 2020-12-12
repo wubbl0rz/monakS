@@ -82,6 +82,17 @@ namespace monakS
       CameraStreamPool cameraStreamPool, 
       AppDbContext ctx)
     {
+      foreach (var capture in ctx.CaptureInfos)
+      {
+        if (capture.IsActive)
+        {
+          capture.IsActive = false;
+          capture.End = capture.Start;
+        }
+      }
+
+      ctx.SaveChanges();
+      
       // var pc = new RTCPeerConnection(null);
       // var r = new WeakReference(pc);
       // WebRtcSignalHub.POOL.Enqueue(pc);
@@ -89,8 +100,8 @@ namespace monakS
 
       //ffmpeg.av_log_set_level(ffmpeg.AV_LOG_QUIET);
 
-      ctx.Database.EnsureDeleted();
-      ctx.Database.EnsureCreated();
+      // ctx.Database.EnsureDeleted();
+      // ctx.Database.EnsureCreated();
 
       //Parallel.For(0, 200, i => { MessageHub.POOL.Enqueue(new RTCPeerConnection(conf)); });
 

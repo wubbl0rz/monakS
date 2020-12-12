@@ -76,7 +76,9 @@
               Save
             </v-btn>
 
-            <v-btn class="mt-8" @click="cancel"> Cancel </v-btn>
+            <v-btn class="mt-8" @click="cancel" :disabled="loading">
+              Cancel
+            </v-btn>
           </v-stepper-content>
 
           <v-stepper-content step="2">
@@ -116,6 +118,7 @@
                   ? 'mdi-motion-sensor'
                   : 'mdi-motion-sensor-off'
               "
+              @click="updateCamera()"
             >
             </v-switch>
             <v-expansion-panels v-show="enableObjectDetection">
@@ -145,12 +148,9 @@
               </v-expansion-panel>
             </v-expansion-panels>
 
-            <v-btn class="mt-8 mr-4" color="green" @click="updateCamera()">
-              Save
-            </v-btn>
-
             <v-btn class="mt-8 mr-4" color="primary" @click="stepper = 3">
-              Continue
+              <div v-if="motionSettingsUpdated">Continue</div>
+              <div v-else>Skip</div>
             </v-btn>
 
             <v-btn class="mt-8" @click="cancel"> Cancel </v-btn>
@@ -257,7 +257,7 @@
             </v-dialog>
 
             <v-btn class="mt-8 mr-4" color="green" @click="$router.push('/')">
-              Save
+              Finish
             </v-btn>
 
             <v-btn class="mt-8" @click="cancel"> Cancel </v-btn>
@@ -278,41 +278,6 @@ export default {
     VideoPlayer,
   },
   methods: {
-    async connect(cam) {
-      return new Promise(async (resolve, reject) => {
-        let pc = new RTCPeerConnection();
-
-        pc.ontrack = async (t) => {
-          let stream = t.streams[0];
-          resolve(stream);
-        };
-
-        pc.onicecandidate = async (e) => {
-          if (e.candidate) {
-            await this.SIGNAL_R.invoke("setCandidate", session_id, e.candidate);
-          }
-        };
-
-        let session_id = await this.SIGNAL_R.invoke("getSessionId", cam);
-
-        let offer_sdp = await this.SIGNAL_R.invoke("getOffer", session_id);
-
-        await pc.setRemoteDescription({
-          type: "offer",
-          sdp: offer_sdp,
-        });
-
-        let answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        let answer_sdp = pc.localDescription.sdp;
-        answer_sdp = answer_sdp.replace(
-          "a=fmtp:102 profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1\r\n",
-          ""
-        );
-        await this.SIGNAL_R.invoke("setAnswer", session_id, answer_sdp);
-      });
-    },
     playing() {
       this.stepper = 2;
       this.loading = false;
@@ -333,6 +298,7 @@ export default {
 
     async updateCamera() {
       this.cam.isObjectDetectionEnabled = this.enableObjectDetection;
+      this.motionSettingsUpdated = true;
 
       let result = await fetch(this.SERVER_URL + `camera/${this.cam.id}`, {
         method: "PUT",
@@ -362,7 +328,7 @@ export default {
 
       if (result.ok) {
         let cam = await result.json();
-        this.stream = await this.connect(cam);
+        this.stream = await this.WEBRTC_CONNECT(cam);
         this.cam = cam;
         this.error = false;
       } else {
@@ -372,6 +338,7 @@ export default {
     },
   },
   data: () => ({
+    motionSettingsUpdated: false,
     dialogStartTime: false,
     dialogStopTime: false,
     startTime: null,

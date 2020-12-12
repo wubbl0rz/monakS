@@ -1,6 +1,7 @@
 <template>
   <div class="home">
     <v-btn
+      class="addBtn"
       @click="$router.push('setup')"
       v-show="cameras != null && cameras.length == 0"
       color="primary"
@@ -8,24 +9,52 @@
       Add Camera
       <v-icon> mdi-camera-plus </v-icon>
     </v-btn>
+
+    <v-dialog
+      v-model="showDialog"
+      fullscreen
+      hide-overlay
+      transition="dialog-bottom-transition"
+    >
+      <v-card>
+        <v-toolbar style="position: fixed; z-index: 1000" width="100vw">
+          <v-btn icon dark @click="showDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+          <v-toolbar-title> Captures </v-toolbar-title>
+          <v-spacer></v-spacer>
+        </v-toolbar>
+        <CaptureOverview
+          v-if="dialogCam != null"
+          :cam="dialogCam"
+        ></CaptureOverview>
+      </v-card>
+    </v-dialog>
     <div v-for="(cam, i) in cameras" :key="i">
-      <VideoPlayer :cam="cam" :stream="streams[cam.id]" />
+      <VideoPlayer
+        @show-files="showFiles(cam)"
+        :cam="cam"
+        :stream="streams[cam.id]"
+      />
     </div>
   </div>
 </template>
 
 <script>
 import VideoPlayer from "@/components/VideoPlayer.vue";
+import CaptureOverview from "@/components/CaptureOverview.vue";
+
 import gql from "graphql-tag";
 
 export default {
   name: "Home",
   components: {
     VideoPlayer,
+    CaptureOverview,
   },
   apollo: {
     $subscribe: {
-      cameras: {
+      onCamerasChanged: {
         query: gql`
           subscription {
             onCamerasChanged {
@@ -39,60 +68,51 @@ export default {
           this.cameras = data.onCamerasChanged;
           this.streams = [];
           for (const cam of this.cameras) {
-            await this.connect(cam);
+            let stream = await this.WEBRTC_CONNECT(cam);
+
+            if (this.ADAPTER.browserDetails.browser == "safari") {
+              setTimeout(() => {
+                this.$set(this.streams, cam.id, stream);
+              }, 100);
+            } else {
+              this.$set(this.streams, cam.id, stream);
+            }
           }
         },
       },
     },
   },
   methods: {
-    async connect(cam, i) {
-      let pc = new RTCPeerConnection();
-
-      pc.ontrack = async (t) => {
-        let stream = t.streams[0];
-        this.$set(this.streams, cam.id, stream);
-      };
-
-      pc.onicecandidate = async (e) => {
-        if (e.candidate) {
-          await this.SIGNAL_R.invoke("setCandidate", session_id, e.candidate);
-        }
-      };
-
-      let session_id = await this.SIGNAL_R.invoke("getSessionId", cam);
-
-      let offer_sdp = await this.SIGNAL_R.invoke("getOffer", session_id);
-
-      await pc.setRemoteDescription({
-        type: "offer",
-        sdp: offer_sdp,
-      });
-
-      let answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      let answer_sdp = pc.localDescription.sdp;
-      answer_sdp = answer_sdp.replace(
-        "a=fmtp:102 profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1\r\n",
-        ""
-      );
-      await this.SIGNAL_R.invoke("setAnswer", session_id, answer_sdp);
+    showFiles(cam) {
+      this.dialogCam = cam;
+      this.showDialog = true;
     },
   },
   data: () => ({
+    showDialog: false,
+    dialogCam: null,
     streams: [],
-    cameras: [],
+    cameras: null,
   }),
 };
 </script>
 
 <style scoped>
-.v-btn {
+.addBtn {
   position: absolute;
   user-select: none;
   top: 50%;
   left: 50%;
   transform: translate(-50%, 0%);
 }
+
+/* v-dialog overflow fix */
+/* .v-dialog {
+  overflow: hidden;
+}
+
+.v-dialog .v-card {
+  overflow: scroll;
+  height: 100%;
+} */
 </style>
