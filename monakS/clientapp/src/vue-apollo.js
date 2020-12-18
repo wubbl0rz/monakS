@@ -8,7 +8,10 @@ Vue.use(VueApollo)
 // Name of the localStorage item
 const AUTH_TOKEN = 'apollo-token'
 
-let SERVER_URL = process.env.NODE_ENV == "development" ? "127.0.0.1:5000/" : "127.0.0.1:5000/";
+let hostname = window.location.hostname;
+let port = window.location.port;
+
+let SERVER_URL = process.env.NODE_ENV == "development" ? "127.0.0.1:5000/" : `${hostname}:${port}/`;
 
 const HTTP_URL = "http://" + SERVER_URL + "graphql";
 const WS_URL = "ws://" + SERVER_URL + "graphql";

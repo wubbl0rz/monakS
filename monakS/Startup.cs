@@ -1,11 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using System.Timers;
-using HotChocolate;
+using FFmpeg.AutoGen;
 using HotChocolate.AspNetCore;
 using HotChocolate.Subscriptions;
 using Microsoft.AspNetCore.Builder;
@@ -13,6 +14,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using monakS.BackgroundServices;
 using monakS.Data;
@@ -23,6 +25,7 @@ using monakS.Models;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Serialization;
 using SIPSorcery.Net;
+using Path = HotChocolate.Path;
 
 namespace monakS
 {
@@ -82,15 +85,23 @@ namespace monakS
       CameraStreamPool cameraStreamPool, 
       AppDbContext ctx)
     {
+      // ctx.Database.EnsureDeleted();
+      ctx.Database.EnsureCreated();
+
+      foreach (var capture in ctx.CaptureInfos)
+      {
+        capture.IsActive = false;
+      }
+
+      ctx.SaveChanges();
+
       // var pc = new RTCPeerConnection(null);
       // var r = new WeakReference(pc);
       // WebRtcSignalHub.POOL.Enqueue(pc);
       // pc = null;
 
-      //ffmpeg.av_log_set_level(ffmpeg.AV_LOG_QUIET);
+      ffmpeg.av_log_set_level(ffmpeg.AV_LOG_QUIET);
 
-      ctx.Database.EnsureDeleted();
-      ctx.Database.EnsureCreated();
 
       //Parallel.For(0, 200, i => { MessageHub.POOL.Enqueue(new RTCPeerConnection(conf)); });
 
@@ -110,7 +121,7 @@ namespace monakS
       var timer = new Timer {AutoReset = false, Interval = 1000};
       timer.Elapsed += (_, args) =>
       {
-        //GC.Collect();
+        GC.Collect();
         var proc = Process.GetCurrentProcess();
         Console.WriteLine("Working set {0} KB", proc.WorkingSet64 / 1024);
         // Console.WriteLine("Active WEBRTC peers: {0}", WebRtcSignalHub.ACTIVE_CONNECTIONS);
@@ -136,6 +147,12 @@ namespace monakS
       }
 
       app.UseFileServer();
+      
+      app.UseStaticFiles(new StaticFileOptions()
+      {
+        FileProvider = new PhysicalFileProvider(Directory.GetCurrentDirectory()+"/captures"),
+        RequestPath = "/captures"
+      });
       
       app.UseRouting();
       

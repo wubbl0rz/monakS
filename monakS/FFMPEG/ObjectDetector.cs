@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Net.Http;
 using System.Text;
@@ -60,7 +61,7 @@ namespace monakS.FFMPEG
         };
 
         var serviceURL = @"http://localhost:8080/detect";
-
+        
         try
         {
           var response = await httpClient.PostAsync(

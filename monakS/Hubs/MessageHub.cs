@@ -18,6 +18,7 @@ using monakS.BackgroundServices;
 using monakS.Data;
 using monakS.FFMPEG;
 using monakS.Models;
+using Org.BouncyCastle.Asn1.Cmp;
 using SIPSorcery.Net;
 using SIPSorcery.SIP.App;
 using SIPSorceryMedia.Abstractions.V1;
@@ -67,7 +68,7 @@ namespace monakS.Hubs
   
   public class CameraUpdatedMessage : EventMessage
   {
-    public Camera OldCam { get; set; } = new Camera();
+    public Camera OldCam { get; set; }
     public Camera UpdatedCam { get; set; }
   }
 
@@ -259,7 +260,10 @@ namespace monakS.Hubs
             var output = _cameraStreamPool.GetOutput(cam);
 
             _log.LogInformation($"RTCPeerConnection {pc.SessionID} CONNECTED.");
-            disposeHandle = output.Subscribe(pkt => { pc?.SendVideo((uint) pkt.Duration, pkt.Data); });
+            disposeHandle = output.Subscribe(pkt =>
+            {
+              pc?.SendVideo((uint) pkt.Duration, pkt.Data);
+            });
             break;
           case RTCPeerConnectionState.closed:
           case RTCPeerConnectionState.failed:

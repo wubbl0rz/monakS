@@ -29,11 +29,14 @@ namespace monakS.Data.GraphQL
     {
       Camera[] MakeDbQuery()
       {
-        return ctx.Cameras.AsNoTracking().ToArray();
+        return ctx.Cameras.AsNoTracking().Where(c => !c.SetupMode).ToArray();
       }
       
       yield return MakeDbQuery();
 
+      
+      //todo: bug wenn camera removed and redirect to / faster than delete
+      
       await foreach (var msg in _eventBus.ToAsyncEnumerable<CameraUpdatedMessage>(cancellationToken))
       {
         yield return MakeDbQuery();

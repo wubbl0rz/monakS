@@ -28,9 +28,9 @@ namespace monakS.BackgroundServices
   {
     public int Id { get; set; }
     public Camera Cam { get; set; }
-    public string Name => $"{this.Cam.Name}_{this.Trigger.ToString()}_{this.Start:yyyy_MM_dd_HH_mm_ss}.mp4";
-    public DateTime Start { get; set; }
-    public DateTime End { get; set; }
+    public string Name => $"{this.Cam.Id}_{this.Cam.Name}_{this.Trigger.ToString()}_{this.Start:yyyy_MM_dd_HH_mm_ss}.mp4";
+    public DateTime Start { get; set; } = DateTime.Now;
+    public DateTime End { get; set; } = DateTime.Now;
     public CaptureTrigger Trigger { get; set; }
     public bool HasError { get; set; }
     public string ErrorMessage { get; set; }
@@ -88,7 +88,7 @@ namespace monakS.BackgroundServices
     {
       _log.LogInformation($"Start capture: {fileName}");
 
-      using var outputFile = new VideoFile(fileName);
+      using var outputFile = new VideoFile("captures/" + fileName);
 
       var pkt = await buffer.FirstAsync();
 

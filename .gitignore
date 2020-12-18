@@ -2,3 +2,5 @@
 monakS/bin
 monakS/obj
 monakS/data.db
+monakS/data.db-wal
+monakS/data.db-shm

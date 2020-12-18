@@ -71,12 +71,33 @@
               class="mt-8 mr-4"
               :color="error ? 'red' : 'green'"
               :loading="loading"
-              @click="addCamera"
+              :disabled="loading"
+              @click="
+                if (!updateMode) {
+                  addCamera();
+                } else {
+                  updateCamera();
+                }
+              "
+              v-text="updateMode ? 'Update' : 'Add'"
             >
-              Save
             </v-btn>
 
-            <v-btn class="mt-8" @click="cancel"> Cancel </v-btn>
+            <v-btn class="mt-8" @click="cancel" :disabled="loading">
+              Cancel
+            </v-btn>
+
+            <v-btn
+              v-if="updateMode"
+              absolute
+              right
+              class="mt-8"
+              color="red"
+              :loading="loading"
+              @click="removeCam"
+            >
+              Delete
+            </v-btn>
           </v-stepper-content>
 
           <v-stepper-content step="2">
@@ -103,7 +124,7 @@
               </span>
             </v-tooltip>
             <VideoPlayer
-              v-if="cam != null"
+              v-if="shouldPlay && cam != null"
               @playing="playing"
               :cam="cam"
               :stream="stream"
@@ -116,6 +137,7 @@
                   ? 'mdi-motion-sensor'
                   : 'mdi-motion-sensor-off'
               "
+              @click="updateCamera()"
             >
             </v-switch>
             <v-expansion-panels v-show="enableObjectDetection">
@@ -145,12 +167,9 @@
               </v-expansion-panel>
             </v-expansion-panels>
 
-            <v-btn class="mt-8 mr-4" color="green" @click="updateCamera()">
-              Save
-            </v-btn>
-
             <v-btn class="mt-8 mr-4" color="primary" @click="stepper = 3">
-              Continue
+              <div v-if="motionSettingsUpdated">Continue</div>
+              <div v-else>Skip</div>
             </v-btn>
 
             <v-btn class="mt-8" @click="cancel"> Cancel </v-btn>
@@ -257,7 +276,7 @@
             </v-dialog>
 
             <v-btn class="mt-8 mr-4" color="green" @click="$router.push('/')">
-              Save
+              Finish
             </v-btn>
 
             <v-btn class="mt-8" @click="cancel"> Cancel </v-btn>
@@ -275,74 +294,66 @@ import gql from "graphql-tag";
 export default {
   name: "Setup",
   components: {
-    VideoPlayer,
+    VideoPlayer
   },
   methods: {
-    async connect(cam) {
-      return new Promise(async (resolve, reject) => {
-        let pc = new RTCPeerConnection();
-
-        pc.ontrack = async (t) => {
-          let stream = t.streams[0];
-          resolve(stream);
-        };
-
-        pc.onicecandidate = async (e) => {
-          if (e.candidate) {
-            await this.SIGNAL_R.invoke("setCandidate", session_id, e.candidate);
-          }
-        };
-
-        let session_id = await this.SIGNAL_R.invoke("getSessionId", cam);
-
-        let offer_sdp = await this.SIGNAL_R.invoke("getOffer", session_id);
-
-        await pc.setRemoteDescription({
-          type: "offer",
-          sdp: offer_sdp,
-        });
-
-        let answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        let answer_sdp = pc.localDescription.sdp;
-        answer_sdp = answer_sdp.replace(
-          "a=fmtp:102 profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1\r\n",
-          ""
-        );
-        await this.SIGNAL_R.invoke("setAnswer", session_id, answer_sdp);
-      });
-    },
     playing() {
       this.stepper = 2;
       this.loading = false;
     },
-    async cancel() {
-      if (this.cam != null) {
+    async removeCam() {
+      if (this.cam != null && this.updateMode && confirm("Ok ?")) {
         fetch(this.SERVER_URL + "camera", {
           method: "DELETE",
           body: JSON.stringify(this.cam),
           headers: {
-            "Content-Type": "application/json",
-          },
+            "Content-Type": "application/json"
+          }
         });
+
+        this.$router.push("/");
+      }
+    },
+    async cancel() {
+      if (!this.updateMode) {
+        this.removeCam();
       }
 
       this.$router.push("/");
     },
 
     async updateCamera() {
-      this.cam.isObjectDetectionEnabled = this.enableObjectDetection;
+      if (this.stepper == 2) {
+        this.cam.isObjectDetectionEnabled = this.enableObjectDetection;
+        this.motionSettingsUpdated = true;
+      } else if (this.stepper == 1) {
+        this.loading = true;
+      }
 
       let result = await fetch(this.SERVER_URL + `camera/${this.cam.id}`, {
         method: "PUT",
-        body: JSON.stringify(this.cam),
+        body: JSON.stringify({
+          id: this.cam.id,
+          name: this.camName,
+          streamUrl: this.camStream,
+          user: this.camUser,
+          password: this.camPassword,
+          isObjectDetectionEnabled: this.enableObjectDetection
+        }),
         headers: {
-          "Content-Type": "application/json",
-        },
+          "Content-Type": "application/json"
+        }
       });
 
-      console.log(await result.json());
+      if (result.ok && this.stepper == 1) {
+        let cam = await result.json();
+        this.stream = await this.WEBRTC_CONNECT(cam);
+        this.cam = cam;
+        this.shouldPlay = true;
+        this.error = false;
+      } else {
+        this.error = true;
+      }
     },
     async addCamera() {
       this.loading = true;
@@ -353,25 +364,42 @@ export default {
           name: this.camName,
           streamUrl: this.camStream,
           user: this.camUser,
-          password: this.camPassword,
+          password: this.camPassword
         }),
         headers: {
-          "Content-Type": "application/json",
-        },
+          "Content-Type": "application/json"
+        }
       });
 
       if (result.ok) {
         let cam = await result.json();
-        this.stream = await this.connect(cam);
+        this.stream = await this.WEBRTC_CONNECT(cam);
         this.cam = cam;
         this.error = false;
+        this.shouldPlay = true;
       } else {
         this.loading = false;
         this.error = true;
       }
-    },
+    }
+  },
+  mounted() {
+    let cam = this.$route.params.cam;
+    if (cam != undefined) {
+      this.cam = cam;
+      this.camName = cam.name;
+      this.updateMode = true;
+      this.camStream = cam.streamUrl;
+      if (this.cam.user != "") {
+        this.camUser = this.cam.user;
+        this.useCredentials = true;
+      }
+    }
   },
   data: () => ({
+    shouldPlay: false,
+    updateMode: false,
+    motionSettingsUpdated: false,
     dialogStartTime: false,
     dialogStopTime: false,
     startTime: null,
@@ -391,8 +419,8 @@ export default {
     camName: "",
     camStream: "",
     stepper: 1,
-    stream: null,
-  }),
+    stream: null
+  })
 };
 </script>
 
